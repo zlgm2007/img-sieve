@@ -282,7 +282,7 @@ def build_result(results, explicit_roles=None):
     explicit_roles: {path: "user"|"chat"}，可选，用于人工指定角色。
     返回 {
         "user": {"nickname":..., "douyin_id":...},
-        "phone": "18652050583",
+        "phone": "18*********",
         "chat_object_name": "多金小肉肉",
         "nickname_check": {
             "user": ..., "chat": ...,

@@ -22,7 +22,7 @@ def recognize(image_paths, backend=None, explicit_roles=None):
           "backend": "vision|tesseract|mock",
           "data": {
             "user": {"nickname": ..., "douyin_id": ...},
-            "phone": "18652050583",
+            "phone": "18*********",
             "chat": {"raw": ...}
           }
         }
