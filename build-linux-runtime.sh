@@ -86,13 +86,27 @@ fi
 
 echo "[build] 3/4 解压并离线安装 rapidocr wheel（Linux x86_64）..."
 tar -xzf .pybs_tmp/python.tar.gz -C .pybs_tmp
-# python-build-standalone 解压结构: <root>/python/bin/python3
-PYPY="$(find .pybs_tmp -maxdepth 3 -type f -name python3 -path '*/bin/*' | head -1)"
+
+# 定位 python 可执行文件（python-build-standalone 中可能是 python3 / python / python3.11，
+# 其中 python3、python 常为指向 python3.11 的符号链接，故不能用 -type f 过滤）
+PYPY=""
+for name in python3 python python3.11; do
+    p="$(find .pybs_tmp -maxdepth 4 -path "*/bin/$name" 2>/dev/null | head -1)"
+    if [ -n "$p" ] && [ -x "$p" ]; then
+        PYPY="$p"
+        break
+    fi
+done
 if [ -z "$PYPY" ]; then
-    echo "[build] 错误: 未找到解压出的 python3 可执行文件。"
+    echo "[build] 错误: 未找到可执行的 python 二进制。"
     exit 1
 fi
-echo "[build]    使用: $PYPY ($("$PYPY" -V))"
+VERSION="$("$PYPY" -V 2>&1)" || {
+    echo "[build] 错误: 无法执行 $PYPY（二进制与当前系统/架构不匹配）。"
+    echo "[build] 确认开发机是 Linux x86_64，或换用与开发机架构匹配的包。"
+    exit 1
+}
+echo "[build]    使用: $PYPY ($VERSION)"
 # 确保 pip
 "$PYPY" -m ensurepip --upgrade >/dev/null 2>&1 || true
 "$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime
