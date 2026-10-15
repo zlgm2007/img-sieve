@@ -1,13 +1,17 @@
-# img-sieve — 抖音截图信息提取服务
+# img-sieve — 抖音/小红书 截图信息提取服务
 
-从抖音截图中提取 **用户昵称 / 抖音号 / 手机号码**，输出结构化 JSON。
+**从用户主页截图提取昵称和平台账号号（抖音号 / 小红书号），从消息对话框截图提取手机号，并核对两处昵称是否一致，输出结构化 JSON。**
 
-**核心约束：完全本地、内网离线部署，运行时零联网。** 不依赖任何云端 OCR API。
-默认 OCR 引擎为 **RapidOCR（PP-OCR v4）**，模型随 pip 包内置、跨平台，中文识别质量高。
+> 适用场景（用户群较窄）：面向需要核验「用户主页身份 + 对话框手机号」的特定人工流程（如运营、审核、客服核对），
+> 本地部署、**纯内网离线运行、图片不出内网**，不依赖任何云端 OCR。
+
+**核心约束：完全本地、内网离线部署，运行时零联网。** 默认 OCR 引擎为 **RapidOCR（PP-OCR v4）**，模型随 pip 包内置、跨平台，中文识别质量高。
 
 ---
 
 ## 识别结果（样例）
+
+抖音（主页「叫我大猫」+ 对话框「叫我大猫」）：
 
 ```json
 {
@@ -21,28 +25,44 @@
     "chat_object_name": "叫我大猫",
     "nickname_consistent": true,
     "nickname_check": {
-      "user": "叫我大猫",
-      "chat": "叫我大猫",
-      "compare_chars": 5,
-      "consistent": true
+      "user": "叫我大猫", "chat": "叫我大猫",
+      "compare_chars": 5, "consistent": true
+    }
+  }
+}
+```
+
+小红书（主页「滴滴嗒哒」+ 对话框「多金小肉肉」，昵称不一致）：
+
+```json
+{
+  "data": {
+    "user": { "nickname": "滴滴嗒哒", "platform": "xiaohongshu",
+               "douyin_id": null, "xiaohongshu_id": "1346204393" },
+    "phone": "15736177791",
+    "chat_object_name": "多金小肉肉",
+    "nickname_consistent": false,
+    "nickname_check": {
+      "user": "滴滴嗒哒", "chat": "多金小肉肉",
+      "compare_chars": 5, "consistent": false
     }
   }
 }
 ```
 
 > **`data.nickname_consistent`**（boolean）：主页昵称与对话框对象昵称是否一致——
-> `true` 一致、`false` 不一致、`null` 任一侧昵称缺失无法判断。
-> 等价于 `data.nickname_check.consistent`，供调用方直接读取。
-> 比对规则：前 **5 位前缀匹配**，可容忍昵称过长在某侧被截断显示。
+> `true` 一致、`false` 不一致、`null` 任一侧昵称缺失无法判断。等价于 `data.nickname_check.consistent`。
+> 比对规则：**前 5 位前缀匹配**，可容忍昵称过长在某侧被截断显示。
 
-`raw/` 内有 4 张测试样例，覆盖两种截图版式（主页/对话框）：
+`raw/` 内有测试样例，覆盖抖音、小红书两种平台的主页 / 对话框版式：
 
-| 图片 | 角色 | 应提取 |
+| 图片 | 平台·角色 | 应提取 |
 |---|---|---|
-| `20261015115909_4787_84.jpg` | 主页 | 叫我大猫 / jiaowodamao996 |
-| `20261015115910_4788_84.jpg` | 对话框 | 手机号 18652050583（`186 520 50 583`） |
-| `20261015135527202.jpg` | 主页（他人视角版式） | 叫我大猫 / jiaowodamao996 |
-| `20261015135547661.jpg` | 对话框（陌生人版式） | 手机号 18652050583（`18 6520 50 583`） |
+| `20261015115909_4787_84.jpg` | 抖音·主页 | 叫我大猫 / jiaowodamao996 |
+| `20261015115910_4788_84.jpg` | 抖音·对话框 | 手机号 18652050583（`186 520 50 583`） |
+| `20261015135527202.jpg` | 抖音·主页（他人视角版式） | 叫我大猫 / jiaowodamao996 |
+| `20261015135547661.jpg` | 抖音·对话框（陌生人版式） | 手机号 18652050583（`18 6520 50 583`） |
+| `xhs20261015144009325.jpg` | 小红书·主页 | 滴滴嗒哒 / 1346204393 |
 
 ---
 
@@ -53,19 +73,21 @@ img-sieve/
 ├── raw/                        # 样例输入图
 ├── img_sieve/
 │   ├── ocr.py                  # OCR 后端抽象：rapidocr(默认)/vision/tesseract/mock
-│   ├── extractor.py            # 字段提取规则（昵称/抖音号/手机号）
+│   ├── extractor.py            # 字段提取规则（昵称/抖音号/小红书号/手机号，平台通用）
 │   └── service.py              # 核心编排：图 → OCR → 提取 → JSON
 ├── cli.py                      # 本地 CLI
-├── server.py                   # HTTP 服务（纯 Python 标准库）
-├── web/ui.html                 # 网页界面（GET / 托管，上传+展示）
+├── server.py                   # HTTP 服务（纯 Python 标准库，ThreadingHTTPServer）
+├── web/ui.html                 # 网页界面（GET / 托管：上传主页图+对话框图，展示识别结果）
 ├── fixtures/sample_ocr.json    # 权威 OCR 夹具（mock 测试用）
 ├── tests/test_extractor.py     # 单元测试
 ├── tessdata/                   # tesseract 备用中文语言包（可选）
 ├── wheels_linux_x86_64/        # Linux x86_64 wheel（Python 3.11，离线安装用）
-├── pack.sh                     # 开发机打包脚本
-├── build-linux-runtime.sh      # 开发机构建自包含 Linux 运行时（服务器无 Python 时用）
+├── pack.sh                     # 开发机打包脚本 → dist/*.tar.gz
+├── build-linux-runtime.sh      # 开发机构建自包含 Linux 运行时（服务器无 Python 时用，支持 macOS/Linux）
 ├── install.sh                  # 目标机离线安装（方案 B，有系统 Python 时）
-├── run.sh                      # 目标机启动服务（自动选 runtime/.venv/.venv_test/python3）
+├── run.sh                      # 启动服务（自动选 runtime/.venv/.venv_test/python3）
+├── stop.sh                     # 停止服务（按端口找 server.py 进程，优雅关闭）
+├── keepalive.sh                # 保活守护（服务崩溃自动重启，start/status/stop）
 └── build.sh                    # （可选）编译 Apple Vision 备用 OCR
 ```
 
@@ -83,7 +105,8 @@ img-sieve/
 后端自动选择：rapidocr 可用 → 用它；否则 vision/tesseract/mock。可用 `--backend` 强制指定。
 
 **为什么选 RapidOCR**：模型（ONNX）内置在 wheel 里，离线安装后运行时零联网、零下载；
-中文 UI / 图上文字识别质量远高于 tesseract（对本项目截图的昵称、抖音号实测准确）。
+中文 UI / 图上文字识别质量远高于 tesseract。**抖音、小红书共用一套 OCR**，按文本内容自动区分平台，
+无需为平台分别部署模型。
 
 ---
 
@@ -109,8 +132,8 @@ img-sieve/
 ```bash
 # 1) 开发机（macOS 或 Linux，有网络）构建自包含 runtime/
 ./build-linux-runtime.sh
-# 2) 打包（runtime/ 自动打入）
-./pack.sh                      # → dist/img-sieve-linux-x86_64.tar.gz（也生成 .zip）
+# 2) 打包
+./pack.sh                      # → dist/img-sieve-linux-x86_64.tar.gz
 ```
 
 内网目标机（无需系统 Python）：
@@ -138,36 +161,54 @@ tar -xzf img-sieve-linux-x86_64.tar.gz && cd img-sieve
 
 ---
 
+## 服务生命周期（run / stop / keepalive）
+
+```bash
+./run.sh --host 0.0.0.0 --port 8080    # 启动服务（前台）
+./stop.sh [--port 8080]               # 停止服务（按端口找 server.py 进程，优雅关闭）
+./keepalive.sh start [--port 8080]    # 拉起服务+启动保活守护（后台、SSH 登出不掉线）
+./keepalive.sh status [--port 8080]   # 查看服务/守护状态
+./keepalive.sh stop   [--port 8080]   # 停止守护并关闭服务
+```
+
+> **保活守护**（`keepalive.sh`）：服务进程意外退出后自动拉起，适合长期部署；
+> `stop.sh` 与 `keepalive.sh stop` 都按端口精确定位本服务进程，不会误杀同端口其他程序。
+
+---
+
 ## 使用
 
 ### 本地 CLI
 
 ```bash
-# 用 venv（已装 rapidocr）运行，自动选后端
+# 主页图 + 对话框图，自动识别角色、自动选 OCR 后端
 ./.venv_test/bin/python cli.py raw/20261015115909_4787_84.jpg raw/20261015115910_4788_84.jpg
 
 # 指定后端
-python3 cli.py <user图> <chat图> --backend rapidocr|vision|tesseract|mock
+python3 cli.py <主页图> <对话框图> --backend rapidocr|vision|tesseract|mock
 
 # 显式指定角色（避免自动判断歧义）
-python3 cli.py <user图> <chat图> --role <user图>=user --role <chat图>=chat
+python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话框图>=chat
 ```
 
-### HTTP 服务
+### HTTP 服务 + 网页界面
 
 ```bash
-./run.sh --host 0.0.0.0 --port 8080          # 目标机（venv）
+./run.sh --host 0.0.0.0 --port 8080          # 目标机（venv 或自包含 runtime）
 python3 server.py --host 0.0.0.0 --port 8080 # 开发机（需已装 rapidocr）
 ```
 
+浏览器打开 `http://<服务地址>:8080/` —— 上传**主页截图 + 对话框截图**两张图，
+点「开始识别」，页面即展示昵称、抖音号/小红书号、手机号、以及昵称是否一致的横幅。
+（网页为单文件自包含，内联样式与脚本，无外部资源。）
+
 接口：
-- `GET /` — 上传 + 展示识别结果的**网页界面**（浏览器打开即可用，内联页面无外部资源）
+
+- `GET /` — 上传 + 展示识别结果的**网页界面**
 - `POST /recognize` — multipart 上传 2 张图片，返回识别 JSON
-  - 文件字段名任意，服务按内容自动识别角色（含"抖音号"→主页；含 11 位手机号→对话框）
+  - 文件字段名任意，服务按内容自动识别角色（含"抖音号/小红书号"→主页；含 11 位手机号→对话框）
   - 可选 `role=<字段名>:user|chat` 指定某字段角色
 - `GET /health` — 健康检查
-
-浏览器打开 `http://<服务地址>:8080/`，选择主页截图 + 对话框截图，点「开始识别」，页面上即展示昵称/抖音号/手机号。
 
 ```bash
 curl -X POST http://127.0.0.1:8080/recognize \
