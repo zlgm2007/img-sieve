@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>抖音截图信息识别</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230e9f8a'/%3E%3Cpath%20d='M8%2023V9h4.5l6%208.5V9H23v14h-4.5L12.5%2014.5V23z'%20fill='white'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#ffffff; --line:#e3e8ee; --ink:#1c2733;
+    --muted:#64748b; --accent:#0e9f8a; --accent-ink:#ffffff;
+    --ok:#0e9f8a; --err:#d64545; --shadow:0 1px 2px rgba(20,30,45,.06),0 6px 20px rgba(20,30,45,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  header{padding:8px 0 18px}
+  h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--muted);font-size:13px;margin:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:18px}
+  .grid{display:grid;gap:16px}
+  @media (min-width:768px){ .grid{grid-template-columns:1fr 1fr} }
+  .up{position:relative;border:1.5px dashed var(--line);border-radius:12px;
+    padding:14px;background:#fafbfc;transition:border-color .15s}
+  .up.drag{border-color:var(--accent);background:#eefaf8}
+  .up-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .up-title{font-weight:600;font-size:14px}
+  .up-hint{color:var(--muted);font-size:12px}
+  .slot{position:relative;min-height:120px;border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center}
+  .slot.empty{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 10px,#f2f4f7 10px,#f2f4f7 20px)}
+  .slot.placeholder{color:var(--muted);font-size:13px;text-align:center;padding:12px;cursor:pointer}
+  .slot.placeholder svg{display:block;margin:0 auto 6px;opacity:.5}
+  .slot img{width:100%;height:100%;max-height:260px;object-fit:contain;display:block;background:#fff}
+  .clear{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;
+    border:none;background:rgba(20,30,45,.55);color:#fff;cursor:pointer;
+    display:none;align-items:center;justify-content:center;padding:0}
+  .clear svg{width:12px;height:12px}
+  .up.has-img .clear{display:flex}
+  .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+  button.primary{border:none;background:var(--accent);color:var(--accent-ink);padding:12px 26px;
+    border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:filter .15s}
+  button.primary:hover{filter:brightness(.95)}
+  button.primary:disabled{opacity:.5;cursor:not-allowed}
+  .status{display:none;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+  .status.on{display:flex}
+  .spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .result{margin-top:18px}
+  .result h2{font-size:16px;margin:0 0 12px}
+  .cards{display:grid;gap:12px}
+  @media (min-width:900px){ .cards{grid-template-columns:repeat(4,1fr)} }
+  @media (min-width:640px) and (max-width:899px){ .cards{grid-template-columns:repeat(2,1fr)} }
+  .rcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+  .rcard .k{color:var(--muted);font-size:12px;margin-bottom:6px}
+  .rcard .v{font-size:20px;font-weight:700;word-break:break-all}
+  .rcard .v.null{color:var(--muted);font-weight:400;font-size:15px}
+  .raw{margin-top:14px}
+  .raw pre{background:#0f172a;color:#d7e0ea;padding:14px;border-radius:10px;overflow:auto;
+    font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;white-space:pre-wrap;word-break:break-all}
+  .alert{padding:12px 14px;border-radius:10px;font-size:14px;margin-top:18px;display:none}
+  .alert.err{background:#fdecec;color:#a22;border:1px solid #f3c6c6;display:block}
+  .err-text{color:var(--err)}
+  .ok{color:var(--ok)}
+  .check{display:none;align-items:center;gap:10px;margin:0 0 14px;padding:12px 14px;
+    border-radius:10px;font-size:14px;font-weight:600}
+  .check.on{display:flex}
+  .check.yes{background:#e6f6f2;color:#0b7a68;border:1px solid #bfe8df}
+  .check.no{background:#fdecec;color:#a22;border:1px solid #f3c6c6}
+  .check.unknown{background:#f1f3f5;color:#64748b;border:1px solid #e3e8ee}
+  .check .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .check.yes .dot{background:#0e9f8a}
+  .check.no .dot{background:#d64545}
+  .check.unknown .dot{background:#94a3b8}
+  .check small{font-weight:400;opacity:.8}
+  .hide{display:none!important}
+  footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>抖音截图信息识别</h1>
+    <p class="sub">上传主页截图与消息对话框截图，识别用户昵称、抖音号与手机号码。图片仅本地处理。</p>
+  </header>
+
+  <section class="card">
+    <div class="grid">
+      <!-- 主页截图 -->
+      <div class="up" id="slotUser">
+        <div class="up-head">
+          <span class="up-title">主页截图</span>
+          <span class="up-hint">含「抖音号」</span>
+        </div>
+        <div class="slot empty" id="dropUser" tabindex="0" role="button" aria-label="选择主页截图">
+          <div class="placeholder" id="phUser">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
+            点击或拖拽选择图片
+          </div>
+          <img id="preUser" class="hide" alt="主页截图预览">
+          <button class="clear" id="clearUser" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <input type="file" id="fileUser" accept="image/*" hidden>
+      </div>
+
+      <!-- 对话框截图 -->
+      <div class="up" id="slotChat">
+        <div class="up-head">
+          <span class="up-title">对话框截图</span>
+          <span class="up-hint">含手机号码</span>
+        </div>
+        <div class="slot empty" id="dropChat" tabindex="0" role="button" aria-label="选择对话框截图">
+          <div class="placeholder" id="phChat">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            点击或拖拽选择图片
+          </div>
+          <img id="preChat" class="hide" alt="对话框截图预览">
+          <button class="clear" id="clearChat" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <input type="file" id="fileChat" accept="image/*" hidden>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="btnRun" disabled>开始识别</button>
+      <div class="status" id="status"><span class="spinner"></span><span id="statusText">识别中…</span></div>
+    </div>
+  </section>
+
+  <div class="alert" id="alert"></div>
+
+  <section class="result hide" id="result">
+    <h2>识别结果</h2>
+    <div class="check on yes" id="checkBanner"><span class="dot"></span><span id="checkText"></span></div>
+    <div class="cards">
+      <div class="rcard"><div class="k">用户昵称</div><div class="v" id="vNick">—</div></div>
+      <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="vId">—</div></div>
+      <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="vObj">—</div></div>
+      <div class="rcard"><div class="k">手机号码</div><div class="v" id="vPhone">—</div></div>
+    </div>
+    <div class="raw"><pre id="rawJson"></pre></div>
+  </section>
+
+  <footer>img-sieve · 图片本地识别，内网离线运行</footer>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var fileUser=document.getElementById('fileUser'),
+      fileChat=document.getElementById('fileChat'),
+      preUser=document.getElementById('preUser'),
+      preChat=document.getElementById('preChat'),
+      phUser=document.getElementById('phUser'),
+      phChat=document.getElementById('phChat'),
+      slotUser=document.getElementById('slotUser'),
+      slotChat=document.getElementById('slotChat'),
+      dropUser=document.getElementById('dropUser'),
+      dropChat=document.getElementById('dropChat'),
+      btn=document.getElementById('btnRun'),
+      statusEl=document.getElementById('status'),
+      alertEl=document.getElementById('alert'),
+      resultEl=document.getElementById('result');
+
+  function setPreview(imgEl, placeholderEl, slotEl, file){
+    if(!file){ placeholderEl.classList.remove('hide'); imgEl.classList.add('hide'); slotEl.classList.remove('has-img'); return; }
+    placeholderEl.classList.add('hide');
+    imgEl.classList.remove('hide');
+    imgEl.src=URL.createObjectURL(file);
+    slotEl.classList.add('has-img');
+  }
+
+  function bindSlot(inputEl, dropEl, imgEl, placeholderEl, slotEl){
+    dropEl.addEventListener('click', function(){ inputEl.click(); });
+    inputEl.addEventListener('change', function(){ setPreview(imgEl, placeholderEl, slotEl, inputEl.files[0]); updateBtn(); });
+    ['dragover','dragenter'].forEach(function(ev){
+      dropEl.addEventListener(ev, function(e){ e.preventDefault(); dropEl.classList.add('drag'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      dropEl.addEventListener(ev, function(e){ e.preventDefault(); dropEl.classList.remove('drag'); });
+    });
+    dropEl.addEventListener('drop', function(e){
+      var f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(f){ inputEl.files=e.dataTransfer.files; setPreview(imgEl, placeholderEl, slotEl, f); updateBtn(); }
+    });
+    // 移除按钮
+    var clearBtn=slotEl.querySelector('.clear');
+    if(clearBtn){
+      clearBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        inputEl.value='';
+        setPreview(imgEl, placeholderEl, slotEl, null);
+        updateBtn();
+      });
+    }
+  }
+
+  function updateBtn(){
+    var hasUser=fileUser.files.length>0, hasChat=fileChat.files.length>0;
+    btn.disabled = !(hasUser || hasChat);
+  }
+
+  function showResult(resp){
+    // resp 为完整响应（含最外层 nickname_consistent）；内部字段在 resp.data
+    var d = resp && resp.data ? resp.data : (resp||{});
+    function set(el,val){
+      el.textContent = (val===null || val===undefined || val==='') ? '未识别到' : val;
+      if(val===null || val===undefined || val==='') el.classList.add('null'); else el.classList.remove('null');
+    }
+    var u=d.user||{};
+    set(document.getElementById('vNick'), u.nickname);
+    set(document.getElementById('vId'), u.douyin_id || u.xiaohongshu_id);
+    set(document.getElementById('vObj'), d.chat_object_name);
+    set(document.getElementById('vPhone'), d.phone);
+
+    // 昵称一致性校验：优先用 data.nickname_consistent，兜底用 data.nickname_check.consistent
+    var cb=document.getElementById('checkBanner'), ct=document.getElementById('checkText');
+    var consistent = (d.nickname_consistent !== undefined)
+        ? d.nickname_consistent
+        : ((d.nickname_check||{}).consistent);
+    var nc=(d.nickname_check)||{};
+    var un=nc.user||'', cn=nc.chat||'';
+    if(consistent===true){
+      cb.className='check on yes'; ct.textContent='昵称一致：主页『'+un+'』与对话框『'+cn+'』匹配';
+    }else if(consistent===false){
+      cb.className='check on no'; ct.textContent='昵称不一致：主页『'+un+'』 ≠ 对话框『'+cn+'』';
+    }else{
+      cb.className='check on unknown'; ct.textContent='无法判断昵称一致性（昵称未识别到）';
+    }
+
+    document.getElementById('rawJson').textContent=JSON.stringify(resp,null,2);
+    resultEl.classList.remove('hide');
+  }
+
+  function setAlert(msg){
+    if(msg){ alertEl.textContent=msg; alertEl.className='alert err'; }
+    else{ alertEl.textContent=''; alertEl.className='alert hide'; }
+  }
+
+  bindSlot(fileUser, dropUser, preUser, phUser, slotUser);
+  bindSlot(fileChat, dropChat, preChat, phChat, slotChat);
+
+  btn.addEventListener('click', function(){
+    var fd=new FormData();
+    var hasAny=false;
+    if(fileUser.files.length){ fd.append('user', fileUser.files[0]); hasAny=true; }
+    if(fileChat.files.length){ fd.append('chat', fileChat.files[0]); hasAny=true; }
+    if(!hasAny) return;
+
+    setAlert(null);
+    statusEl.classList.add('on');
+    btn.disabled=true;
+
+    fetch('/recognize',{method:'POST',body:fd})
+      .then(function(r){ return r.json().catch(function(){ throw new Error('响应解析失败'); }); })
+      .then(function(res){
+        if(res && res.code===0 && res.data){ showResult(res); }
+        else { setAlert((res&&res.message)||'识别失败'); resultEl.classList.add('hide'); }
+      })
+      .catch(function(e){ setAlert('请求失败：'+(e.message||'未知错误')); resultEl.classList.add('hide'); })
+      .finally(function(){ statusEl.classList.remove('on'); btn.disabled=false; updateBtn(); });
+  });
+})();
+</script>
+</body>
+</html>

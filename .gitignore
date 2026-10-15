@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv_test/
+
+# 构建产物
+dist/
+wheels_linux_*/
+bin/ocr_helper
+
+# 系统
+.DS_Store
+
+# 自包含 Linux 运行时（build-linux-runtime.sh 生成，体积大，不应提交）
+runtime/
+.pybs_tmp/
+
+# 下载的 OCR 语言数据（可由脚本重新下载）
+tessdata/
+
+# 测试截图（含个人数据；单测走 fixtures/mock，无需提交）
+raw/
+
+# 页面自检产物（html skill 生成）
+web/_shots/
+
+# 日志
+*.log
