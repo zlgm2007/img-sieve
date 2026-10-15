@@ -11,8 +11,20 @@
 #
 # 说明：会通过 GitHub API 自动解析 python-build-standalone 最新 release，
 # 匹配其中 cpython-3.11 的 x86_64 install_only 资产，无需手填版本号。
-set -euo pipefail
+set -eo pipefail
 cd "$(dirname "$0")"
+
+# 必须在 Linux 上构建：可移植 Python 是 Linux ELF 二进制，macOS/Windows 无法执行它来装 wheel。
+# 目标机是 Linux 内网的话，直接把本项目（含 .pybs_tmp/python.tar.gz、wheels_linux_x86_64/）
+# 拷到 Linux（可用目标机本身）再运行本脚本即可——检测到已下载的 tar 包会跳过联网下载。
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "[build] 错误: 本脚本必须在 Linux 上运行（当前系统: $(uname -s)）。"
+    echo "[build] 自包含运行时是 Linux x86_64 的 Python，需在 Linux 上执行以离线安装 wheel。"
+    echo "[build] 请在 Linux 机器上执行："
+    echo "[build]   （1）把项目目录拷贝到 Linux，确保含 .pybs_tmp/python.tar.gz 和 wheels_linux_x86_64/"
+    echo "[build]   （2）./build-linux-runtime.sh"
+    exit 1
+fi
 
 if [ ! -d wheels_linux_x86_64 ]; then
     echo "[build] 错误: 缺少 wheels_linux_x86_64/，请先准备 Linux x86_64 wheel。"
