@@ -1,36 +1,21 @@
 #!/usr/bin/env bash
-# 开发机（可联网）一键构建「自包含 Linux 运行环境」。
+# 开发机(可联网)一键构建「自包含 Linux x86_64 运行环境」(runtime/)。
 #
-# 作用：内网服务器没有 Python 时，用它生成一个随包携带的、完全自包含的
-# Linux x86_64 CPython 3.11 + rapidocr 环境（runtime/）。
-# 目标机无需系统 Python、无需安装任何包，解包后直接运行 runtime/bin/python3 server.py。
+# 支持在 Linux 或 macOS 上构建：
+#   Linux : 解压后直接运行 linux python，用其 pip 离线装 wheel
+#   macOS : 用本机 python3 的 pip 做跨平台安装(--platform manylinux2014_x86_64)，
+#           把 linux wheel 直接解压进 linux python 的 site-packages，无需执行 linux python
 #
-# 用法（在可联网的开发机上执行一次）:
-#   ./build-linux-runtime.sh
-# 成功后产出 runtime/，再 ./pack.sh 打包即可。
-#
-# 说明：会通过 GitHub API 自动解析 python-build-standalone 最新 release，
-# 匹配其中 cpython-3.11 的 x86_64 install_only 资产，无需手填版本号。
+# 产出 runtime/ 完全自包含；目标机(Linux 内网,如 CentOS7 x86_64)解压后直接 ./run.sh，
+# 无需系统 Python、无需联网安装。构建完成后 ./pack.sh 打成部署包即可。
 set -eo pipefail
 cd "$(dirname "$0")"
-
-# 必须在 Linux 上构建：可移植 Python 是 Linux ELF 二进制，macOS/Windows 无法执行它来装 wheel。
-# 目标机是 Linux 内网的话，直接把本项目（含 .pybs_tmp/python.tar.gz、wheels_linux_x86_64/）
-# 拷到 Linux（可用目标机本身）再运行本脚本即可——检测到已下载的 tar 包会跳过联网下载。
-if [ "$(uname -s)" != "Linux" ]; then
-    echo "[build] 错误: 本脚本必须在 Linux 上运行（当前系统: $(uname -s)）。"
-    echo "[build] 自包含运行时是 Linux x86_64 的 Python，需在 Linux 上执行以离线安装 wheel。"
-    echo "[build] 请在 Linux 机器上执行："
-    echo "[build]   （1）把项目目录拷贝到 Linux，确保含 .pybs_tmp/python.tar.gz 和 wheels_linux_x86_64/"
-    echo "[build]   （2）./build-linux-runtime.sh"
-    exit 1
-fi
+OS="$(uname -s)"
 
 if [ ! -d wheels_linux_x86_64 ]; then
     echo "[build] 错误: 缺少 wheels_linux_x86_64/，请先准备 Linux x86_64 wheel。"
     exit 1
 fi
-
 mkdir -p .pybs_tmp
 
 # 国内镜像代理（无需梯子）；直连 github 需梯子，仅作最后兜底
@@ -43,21 +28,16 @@ MIRRORS=(
   "https://ghproxy.cc/"
 )
 
-# 通过镜像解析 cpython-3.11 x86_64 install_only 资产的真实下载地址
 resolve_asset_url() {
     for m in "${MIRRORS[@]}"; do
         JSON="$(curl -sSL --max-time 25 "${m}${API}" 2>/dev/null || true)"
         [ -z "$JSON" ] && continue
         u="$(printf '%s' "$JSON" | grep -oE '"browser_download_url": *"[^"]*cpython-3\.11[^"]*x86_64-unknown-linux-gnu-install_only[^"]*"' | head -1 | sed -E 's/.*"browser_download_url": *"([^"]+)".*/\1/')"
-        if [ -n "$u" ]; then
-            echo "$u"
-            return 0
-        fi
+        if [ -n "$u" ]; then echo "$u"; return 0; fi
     done
     return 1
 }
 
-# 下载：先走国内镜像，最后直连 github
 download() {
     local url="$1" m
     for m in "${MIRRORS[@]}"; do
@@ -70,6 +50,7 @@ download() {
     curl -L --fail --max-time 600 "${url}" -o .pybs_tmp/python.tar.gz 2>/dev/null && [ -s .pybs_tmp/python.tar.gz ]
 }
 
+# ---- 1) 获取可移植 CPython 3.11 tarball ----
 if [ -f .pybs_tmp/python.tar.gz ]; then
     echo "[build] 检测到已下载的 .pybs_tmp/python.tar.gz，跳过联网解析与下载"
 else
@@ -96,42 +77,44 @@ else
     fi
 fi
 
-echo "[build] 3/4 解压并离线安装 rapidocr wheel（Linux x86_64）..."
+# ---- 2) 解压 ----
+echo "[build] 3/4 解压 ..."
 tar -xzf .pybs_tmp/python.tar.gz -C .pybs_tmp
-
-# 定位 python 可执行文件（python-build-standalone 中可能是 python3 / python / python3.11，
-# 其中 python3、python 常为指向 python3.11 的符号链接，故不能用 -type f 过滤）
-PYPY=""
-for name in python3 python python3.11; do
-    p="$(find .pybs_tmp -maxdepth 4 -path "*/bin/$name" 2>/dev/null | head -1)"
-    if [ -n "$p" ] && [ -x "$p" ]; then
-        PYPY="$p"
-        break
-    fi
-done
-if [ -z "$PYPY" ]; then
-    echo "[build] 错误: 未找到可执行的 python 二进制。"
+PYROOT="$(find .pybs_tmp -maxdepth 2 -type d -name python 2>/dev/null | head -1)"
+if [ -z "$PYROOT" ]; then
+    echo "[build] 错误: 解压后未找到 python 目录。"
     exit 1
 fi
-VERSION="$("$PYPY" -V 2>&1)" || {
-    echo "[build] 错误: 无法执行 $PYPY（二进制与当前系统/架构不匹配）。"
-    echo "[build] 确认开发机是 Linux x86_64，或换用与开发机架构匹配的包。"
-    exit 1
-}
-echo "[build]    使用: $PYPY ($VERSION)"
-# 确保 pip
-"$PYPY" -m ensurepip --upgrade >/dev/null 2>&1 || true
-"$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime
+SP="$PYROOT/lib/python3.11/site-packages"
 
-echo "[build] 4/4 验证自包含环境 ..."
-"$PYPY" -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR(); print('    RapidOCR 初始化成功')"
+# ---- 3) 离线安装 rapidocr wheel ----
+echo "[build] 3/4 离线安装 rapidocr wheel（Linux x86_64）..."
+if [ "$OS" = "Linux" ]; then
+    PYPY="$(find "$PYROOT/bin" -maxdepth 1 \( -name python -o -name python3 \) 2>/dev/null | head -1)"
+    [ -n "$PYPY" ] && [ -x "$PYPY" ] || { echo "[build] 错误: 未找到可执行的 python。"; exit 1; }
+    echo "[build]    使用: $PYPY ($("$PYPY" -V 2>&1))"
+    "$PYPY" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    "$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime
+else
+    echo "[build]    当前系统: $OS（macOS/非Linux）→ 用本机 pip 跨平台安装 linux wheel"
+    mkdir -p "$SP"
+    python3 -m pip install --no-index --find-links wheels_linux_x86_64 \
+        --platform manylinux2014_x86_64 --python-version 3.11 \
+        --only-binary=:all: --target "$SP" rapidocr_onnxruntime
+fi
 
-# 把解压出的 python 目录整理为 runtime/
+# ---- 4) 整理为 runtime/ 并校验 ----
 rm -rf runtime
 mkdir -p runtime
-cp -R "$(dirname "$(dirname "$PYPY")")/." runtime/
+cp -R "$PYROOT"/. runtime/
+# 校验关键模块是否就位
+if [ -f runtime/lib/python3.11/site-packages/rapidocr_onnxruntime/__init__.py ] \
+   || [ -d runtime/lib/python3.11/site-packages/rapidocr_onnxruntime ]; then
+    echo "[build] 4/4 校验: rapidocr_onnxruntime 已装入 runtime/"
+else
+    echo "[build] 警告: runtime/ 中未找到 rapidocr_onnxruntime，请检查安装日志。"
+fi
 rm -rf .pybs_tmp
 
-echo "[build] 完成: runtime/ 已就绪（自包含，无需目标机装 Python）"
-echo "[build] 目标机部署: 解包后直接 ./run.sh 即可"
-echo "[build] 请确认 runtime/bin/python3 -V 输出 3.11"
+echo "[build] 完成: runtime/ 已就绪（自包含 Linux x86_64，目标机直接 ./run.sh）"
+echo "[build] 请确认 runtime/bin/python3 存在；打包部署用 ./pack.sh"

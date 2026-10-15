@@ -99,13 +99,18 @@ img-sieve/
 
 ### 方案 A：服务器无 Python —— 自包含运行时（推荐）
 
-在**可联网的开发机**上构建一次自包含 Linux 运行环境，随包部署后目标机零安装：
+`build-linux-runtime.sh` 生成自包含的 `runtime/`（Linux x86_64 CPython 3.11 + rapidocr），
+目标机无需系统 Python、无需联网安装。**支持在 Linux 或 macOS 上构建**：
+
+- **Linux**：解压后直接运行 linux python 离线装 wheel。
+- **macOS**：用本机 pip 跨平台（`--platform manylinux2014_x86_64`）把 linux wheel 装进解压的
+  linux python，无需执行 linux python——**没有 Linux 也能在 Mac 上打包**。
 
 ```bash
-# 1) 开发机（有网络）：构建自包含 runtime/（下载可移植 CPython 3.11 + 离线装 rapidocr）
+# 1) 开发机（macOS 或 Linux，有网络）构建自包含 runtime/
 ./build-linux-runtime.sh
-# 2) 打包（runtime/ 会自动打入包内）
-./pack.sh                      # → dist/img-sieve-linux-x86_64.tar.gz
+# 2) 打包（runtime/ 自动打入）
+./pack.sh                      # → dist/img-sieve-linux-x86_64.tar.gz（也生成 .zip）
 ```
 
 内网目标机（无需系统 Python）：
@@ -115,8 +120,8 @@ tar -xzf img-sieve-linux-x86_64.tar.gz && cd img-sieve
 ./run.sh --host 0.0.0.0 --port 8080     # 直接用自带 runtime/bin/python3 运行
 ```
 
-> `build-linux-runtime.sh` 从 python-build-standalone 下载可移植 CPython 3.11，
-> 需开发机能访问 github；构建一次后 runtime/ 即可重复打包。
+> `build-linux-runtime.sh` 从 python-build-standalone 获取可移植 CPython 3.11，
+> 走国内镜像代理下载（无需梯子）。
 
 ### 方案 B：目标机已装 Python 3.11
 
