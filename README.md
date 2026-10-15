@@ -155,42 +155,6 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 ***
 
-## Linux 内网部署
-
-**方案 A（推荐）：服务器无 Python —— 自包含运行时**
-
-
-
-```
-# 开发机（macOS 或 Linux，有网络）
-./build-linux-runtime.sh      # 构建自包含 runtime/（国内镜像下载，无需梯子）
-./pack.sh                     # → dist/img-sieve-linux-x86_64.tar.gz
-
-# 内网目标机（无需系统 Python）
-tar -xzf img-sieve-linux-x86_64.tar.gz && cd img-sieve
-./run.sh --host 0.0.0.0 --port 8080
-```
-
-**方案 B：目标机已装 Python 3.11**
-
-
-
-```
-tar -xzf img-sieve-linux-x86_64.tar.gz && cd img-sieve
-./install.sh          # 离线安装依赖（全程无网络）
-./run.sh --host 0.0.0.0 --port 8080
-```
-
-> 应用代码 Python 3.8+；OCR 依赖 wheel 为 
->
-> **cp311**
->
->  编译，须 Python 3.11。
-
-
-
-***
-
 ## 附录
 
 核心技术细节（OCR 后端、提取规则、项目结构、Python 版本、部署细节、服务进程管理、测试）见 **[doc/technical.md](doc/technical.md)**。
