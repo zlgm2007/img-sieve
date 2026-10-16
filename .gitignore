@@ -31,3 +31,6 @@ web/_shots/
 
 #idea
 .idea/
+
+#deploy
+deploy/
