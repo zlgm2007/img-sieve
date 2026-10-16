@@ -10,6 +10,12 @@
 set -eo pipefail
 cd "$(dirname "$0")"
 
+# 项目标识横幅
+print_banner() {
+    echo "[img-sieve] 工具: img-sieve —— 抖音 / 小红书截图信息提取服务"
+    echo "[img-sieve] 作者: zhou liang"
+}
+
 CMD="${1:-}"
 [ $# -gt 0 ] && shift
 PORT=8080
@@ -74,6 +80,7 @@ _supervise() {
 
 case "$CMD" in
     start)
+        print_banner
         if supervisor_alive; then
             echo "[keepalive] 守护已在运行（PID $(cat "$SUPER_PID_FILE")），端口 ${PORT}。"
         else

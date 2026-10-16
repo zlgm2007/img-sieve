@@ -13,7 +13,7 @@
 #   ├── wheels_linux_x86_64/   # Linux x86_64 wheel（Python 3.11）
 #   ├── install.sh             # 目标机离线安装
 #   ├── run.sh                 # 目标机启动服务
-#   └── raw/                   # 样例图片（可选）
+#   └── web/                   # 网页界面
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -54,19 +54,23 @@ cp -R "$WHEEL_DIR" "$STAGE/"
 if [ -d runtime ]; then
     cp -R runtime "$STAGE/"
 fi
-# 3) 样例图（可选，便于目标机自测）
-if [ -d raw ]; then
-    cp -R raw "$STAGE/"
-fi
 
 # 清理 __pycache__ 与自检截图产物
 find "$STAGE" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$STAGE/web/_shots" 2>/dev/null || true
 
-# 4) 打成 tar.gz
+# 剥离 macOS 扩展属性（com.apple.provenance / lastuseddate 等）。
+# 若不剥离，macOS bsdtar 会把它们以 PAX 扩展头(LIBARCHIVE.xattr.*)写进压缩包，
+# 目标机 Linux 的老版 GNU tar 会误解析，导致文件名被加前导 "-"、文件字节错位。
+if [ "$(uname -s)" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
+    echo "[pack] 剥离 macOS 扩展属性 (xattr -cr) ..."
+    xattr -cr "$STAGE" 2>/dev/null || true
+fi
+
+# 4) 打成 tar.gz（bsdtar 显式禁用 xattr / ._ 文件，避免污染部署包）
 mkdir -p "$OUT_DIR"
 TARBALL="$OUT_DIR/img-sieve-linux-${ARCH}.tar.gz"
-tar -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
+COPYFILE_DISABLE=1 tar --no-xattrs --no-fflags -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
 rm -rf "$OUT_DIR/_stage"
 
 echo "[pack] 打包完成: $TARBALL"

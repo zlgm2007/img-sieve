@@ -7,10 +7,45 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 日志目录：确保 logs/ 存在；前台(终端)运行时把全部输出同时落到控制台与 logs/server.log。
+LOG_DIR="logs"
+mkdir -p "$LOG_DIR"
+if [ -t 1 ]; then
+    # 前台：重跑自身，stdout 经 tee 同时写控制台 + server.log。
+    # 重跑后 stdout 变为管道(非终端)，不会再进入本分支，避免递归。
+    exec "$0" "$@" 2>&1 | tee -a "$LOG_DIR/server.log"
+fi
+
+# 项目标识横幅
+print_banner() {
+    echo "[img-sieve] 工具: img-sieve —— 抖音 / 小红书截图信息提取服务"
+    echo "[img-sieve] 作者: zhou liang"
+}
+
+# 解析监听端口（默认 8080），用于 keepalive / cron 提示
+PORT=8080
+args=("$@")
+for i in "${!args[@]}"; do
+    if [ "${args[$i]}" = "--port" ] && [ $((i+1)) -lt "${#args[@]}" ]; then
+        PORT="${args[$((i+1))]}"
+    fi
+done
+
 for PY in runtime/bin/python3 .venv/bin/python .venv_test/bin/python python3; do
     if [ -x "$PY" ] || command -v "$PY" >/dev/null 2>&1; then
         if "$PY" -c "import rapidocr_onnxruntime" 2>/dev/null; then
             echo "[run] 使用环境: $PY"
+            print_banner
+            # 启动前的保活提示（前台运行时提示；exec 后 shell 即被 server.py 接管）
+            PROJ_DIR="$(pwd)"
+            echo ""
+            echo "[run] 服务将在前台启动（Ctrl-C 停止）。如需后台保活，二选一："
+            echo "      # 方式一：直接拉起保活守护（可登出 SSH、崩溃自动重启）"
+            echo "      ./keepalive.sh start --port $PORT     # 查看 ./keepalive.sh status，停止 ./keepalive.sh stop"
+            echo "      # 方式二：cron 定时保活（服务/守护异常退出后自动恢复）"
+            echo "      crontab -e  添加一行："
+            echo "      */1 * * * * cd $PROJ_DIR && ./keepalive.sh start --port $PORT >/dev/null 2>&1"
+            echo ""
             exec "$PY" server.py "$@"
         fi
     fi

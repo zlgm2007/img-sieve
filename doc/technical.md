@@ -41,6 +41,11 @@ img-sieve/
 **为什么选 RapidOCR**：模型（ONNX）内置在 wheel 里，离线安装后运行时零联网、零下载；
 中文 UI / 图上文字识别质量远高于 tesseract。**抖音、小红书共用一套 OCR**，按文本内容自动区分平台，无需分模型。
 
+**性能调优（可选，默认不改行为）**：识别是 CPU 密集型，单次耗时主要取决于服务器算力。可在启动前用环境变量微调（不设则保持默认）：
+
+- `IMG_SIEVE_OCR_THREADS=<N>`：onnxruntime 每算子线程数（默认自动）。实测对耗时影响很小，仅当 VM 多核且 onnxruntime 默认线程配置不佳时可尝试设为物理核数。
+- `IMG_SIEVE_DET_LIMIT=<N>`：检测阶段长边缩放上限（默认 736）。调小可略降检测耗时，但可能漏识别小字，需用真实截图验证准确率后再用。
+
 ## 提取规则（平台通用）
 
 - **账号字段**：按平台匹配——`抖音号[:：]<字母数字>` → `douyin_id`；`小红书号[:：]<字母数字>` → `xiaohongshu_id`；兜底取声明行尾部字母数字串。平台按文本自动识别 `platform`。
@@ -92,3 +97,6 @@ pip download --dest wheels_linux_arm64 \
 ```bash
 python3 -m tests.test_extractor          # 提取规则单测（权威 OCR 夹具）
 ```
+
+**测试环境**：`http://10.237.179.21:8080/`（网页界面；接口 `POST /recognize`、`GET /health`）
+
