@@ -12,9 +12,53 @@ set -eo pipefail
 cd "$(dirname "$0")"
 OS="$(uname -s)"
 
-if [ ! -d wheels_linux_x86_64 ]; then
-    echo "[build] 错误: 缺少 wheels_linux_x86_64/，请先准备 Linux x86_64 wheel。"
-    exit 1
+# 确保 Linux x86_64 wheel 就绪。缺失/为空时自动联网下载（构建期唯一联网点）。
+# 纯内网构建：可先在联网机器上用下方命令填充本目录，再拷进内网离线执行。
+#    python3 -m pip download --dest wheels_linux_x86_64 \
+#        --platform manylinux_2_17_x86_64 --python-version 311 --only-binary=:all: \
+#        rapidocr_onnxruntime
+WHEEL_DIR="wheels_linux_x86_64"
+if [ ! -d "$WHEEL_DIR" ] || ! compgen -G "$WHEEL_DIR/*.whl" >/dev/null 2>&1; then
+    echo "[build] 未找到 $WHEEL_DIR/*.whl，自动下载 Linux x86_64 wheel（需联网）..."
+    mkdir -p "$WHEEL_DIR"
+    python3 -m pip download --dest "$WHEEL_DIR" \
+        --platform manylinux_2_17_x86_64 \
+        --python-version 311 \
+        --only-binary=:all: \
+        rapidocr_onnxruntime
+
+    # 目标机多为无显示服务器，官方 opencv-python 自带 Qt/X11，加载时缺 libxcb 等库会崩。
+    # 故强制改用 opencv-python-headless，并同步把 rapidocr 的依赖声明改写为 headless。
+    rm -f "$WHEEL_DIR"/opencv_python-*.whl
+    python3 -m pip download --dest "$WHEEL_DIR" --no-deps \
+        --platform manylinux_2_17_x86_64 \
+        --python-version 311 \
+        --only-binary=:all: \
+        opencv-python-headless
+    python3 - "$WHEEL_DIR" <<'PY'
+import glob, os, re, sys, zipfile, tempfile, shutil
+whl = glob.glob(os.path.join(sys.argv[1], "rapidocr_onnxruntime-*.whl"))[0]
+tmp = tempfile.mkdtemp()
+with zipfile.ZipFile(whl) as z:
+    z.extractall(tmp)
+meta = glob.glob(os.path.join(tmp, "rapidocr_onnxruntime-*.dist-info", "METADATA"))[0]
+with open(meta, encoding="utf-8") as f:
+    txt = f.read()
+new, n = re.subn(r"(?m)^Requires-Dist: opencv-python(?!-)",
+                 "Requires-Dist: opencv-python-headless", txt)
+assert n > 0, "rapidocr METADATA 未找到 opencv-python 依赖行，无法切换到 headless"
+with open(meta, "w", encoding="utf-8") as f:
+    f.write(new)
+dst = whl + ".new"
+with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
+    for root, _, files in os.walk(tmp):
+        for fn in files:
+            full = os.path.join(root, fn)
+            z.write(full, os.path.relpath(full, tmp))
+shutil.move(dst, whl)
+shutil.rmtree(tmp)
+print("[build]    rapidocr 依赖已改写为 opencv-python-headless")
+PY
 fi
 mkdir -p .pybs_tmp
 
