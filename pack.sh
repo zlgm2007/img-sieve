@@ -74,7 +74,7 @@ fi
 # 4) 打成 tar.gz（bsdtar 显式禁用 xattr / ._ 文件，避免污染部署包）
 mkdir -p "$OUT_DIR"
 TARBALL="$OUT_DIR/img-sieve-linux-${ARCH}.tar.gz"
-COPYFILE_DISABLE=1 tar --no-xattrs -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
+COPYFILE_DISABLE=1 tar --no-xattrs --no-fflags -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
 rm -rf "$OUT_DIR/_stage"
 
 echo "[pack] 打包完成: $TARBALL"
