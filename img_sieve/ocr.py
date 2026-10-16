@@ -291,6 +291,22 @@ def run_mock(image_paths, fixture=None):
 _rapid_engine = None
 
 
+def _rapid_tuning():
+    """从环境变量读取可选的 RapidOCR 调优参数（默认不传，保持原行为）。
+
+    - IMG_SIEVE_OCR_THREADS   : intra_op_num_threads（onnxruntime 每算子线程数）
+    - IMG_SIEVE_DET_LIMIT     : det_limit_side_len（检测阶段长边缩放上限，越小越快但可能漏小字）
+    """
+    kwargs = {}
+    t = os.environ.get("IMG_SIEVE_OCR_THREADS", "").strip()
+    if t.isdigit() and int(t) >= 1:
+        kwargs["intra_op_num_threads"] = int(t)
+    d = os.environ.get("IMG_SIEVE_DET_LIMIT", "").strip()
+    if d.isdigit() and int(d) >= 1:
+        kwargs["det_limit_side_len"] = int(d)
+    return kwargs
+
+
 def _get_rapid_engine():
     """懒加载并复用 RapidOCR 引擎（首次调用较慢，加载 ONNX 模型）。"""
     global _rapid_engine
@@ -301,7 +317,7 @@ def _get_rapid_engine():
             raise OCRBackendError(
                 "未安装 rapidocr_onnxruntime。请用 pip 安装 "
                 "`rapidocr_onnxruntime`（模型随包内置，离线可用）。")
-        _rapid_engine = RapidOCR()
+        _rapid_engine = RapidOCR(**_rapid_tuning())
     return _rapid_engine
 
 

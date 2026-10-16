@@ -7,6 +7,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 项目标识横幅
+print_banner() {
+    echo "[img-sieve] 工具: img-sieve —— 抖音 / 小红书截图信息提取服务"
+    echo "[img-sieve] 作者: zhou liang"
+}
+
 # 解析监听端口（默认 8080），用于 keepalive / cron 提示
 PORT=8080
 args=("$@")
@@ -20,6 +26,7 @@ for PY in runtime/bin/python3 .venv/bin/python .venv_test/bin/python python3; do
     if [ -x "$PY" ] || command -v "$PY" >/dev/null 2>&1; then
         if "$PY" -c "import rapidocr_onnxruntime" 2>/dev/null; then
             echo "[run] 使用环境: $PY"
+            print_banner
             # 启动前的保活提示（前台运行时提示；exec 后 shell 即被 server.py 接管）
             PROJ_DIR="$(pwd)"
             echo ""

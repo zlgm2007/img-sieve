@@ -78,6 +78,9 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"),
                                         fmt % args))
 
+    def _log(self, msg):  # 业务日志（与 log_message 同通道，写入 stderr → server.log）
+        sys.stderr.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+
     # ---------- routes ----------
     def do_GET(self):
         path = urlparse(self.path).path
@@ -146,13 +149,19 @@ class Handler(BaseHTTPRequestHandler):
                     idx = [x[0] for x in files].index(fname)
                     explicit[tmp_paths[idx]] = role
 
+            t0 = time.perf_counter()
             try:
                 result = recognize(tmp_paths, backend=self.backend,
                                    explicit_roles=explicit or None)
             except ocr.OCRBackendError as e:
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._log(f"/recognize 识别失败, 耗时 {elapsed_ms:.1f} ms, "
+                          f"图片={len(files)} 张, 原因={e}")
                 self._send_json({"code": 500, "message": str(e)}, 500)
                 return
-
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            self._log(f"/recognize 识别成功, 耗时 {elapsed_ms:.1f} ms, "
+                      f"图片={len(files)} 张, backend={self.backend or 'auto'}")
             self._send_json(result)
         finally:
             for p in tmp_paths:
