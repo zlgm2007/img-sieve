@@ -63,10 +63,18 @@ fi
 find "$STAGE" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$STAGE/web/_shots" 2>/dev/null || true
 
-# 4) 打成 tar.gz
+# 剥离 macOS 扩展属性（com.apple.provenance / lastuseddate 等）。
+# 若不剥离，macOS bsdtar 会把它们以 PAX 扩展头(LIBARCHIVE.xattr.*)写进压缩包，
+# 目标机 Linux 的老版 GNU tar 会误解析，导致文件名被加前导 "-"、文件字节错位。
+if [ "$(uname -s)" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
+    echo "[pack] 剥离 macOS 扩展属性 (xattr -cr) ..."
+    xattr -cr "$STAGE" 2>/dev/null || true
+fi
+
+# 4) 打成 tar.gz（bsdtar 显式禁用 xattr / ._ 文件，避免污染部署包）
 mkdir -p "$OUT_DIR"
 TARBALL="$OUT_DIR/img-sieve-linux-${ARCH}.tar.gz"
-tar -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$OUT_DIR/_stage" -czf "$TARBALL" img-sieve
 rm -rf "$OUT_DIR/_stage"
 
 echo "[pack] 打包完成: $TARBALL"
