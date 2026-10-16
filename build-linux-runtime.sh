@@ -142,7 +142,7 @@ if [ "$OS" = "Linux" ]; then
     "$PYPY" -m ensurepip --upgrade >/dev/null 2>&1 || true
     "$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime
 else
-    echo "[build]    当前系统: $OS（macOS/非Linux）→ 用本机 pip 跨平台安装 linux wheel"
+    echo "[build]    当前系统: ${OS}（macOS/非Linux）→ 用本机 pip 跨平台安装 linux wheel"
     mkdir -p "$SP"
     python3 -m pip install --no-index --find-links wheels_linux_x86_64 \
         --platform manylinux2014_x86_64 --python-version 3.11 \

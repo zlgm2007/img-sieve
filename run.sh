@@ -46,6 +46,10 @@ for PY in runtime/bin/python3 .venv/bin/python .venv_test/bin/python python3; do
             echo "      crontab -e  添加一行："
             echo "      */1 * * * * cd $PROJ_DIR && ./keepalive.sh start --port $PORT >/dev/null 2>&1"
             echo ""
+            # 记录 PID，供 stop.sh / keepalive.sh 精确定位进程。
+            # 服务器可能没有 lsof，PID 文件是唯一不依赖外部命令的途径。
+            # exec 会替换当前 shell，但 PID 不变，因此这里记的就是 server.py 的 PID。
+            echo $$ > "logs/server_${PORT}.pid"
             exec "$PY" server.py "$@"
         fi
     fi

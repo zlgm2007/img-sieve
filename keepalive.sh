@@ -33,8 +33,17 @@ SUPER_PID_FILE="$LOG_DIR/keepalive_super.pid"
 # 端口是否有进程在监听（lsof: mac/linux；ss: centos 自带；fuser: linux psmisc）
 is_listening() {
     local p="$1"
-    if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -ti tcp:"$p" 2>/dev/null)" ]; then return 0; fi
+    # 1) ss（CentOS 7 自带，最可能可用）
     if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":$p "; then return 0; fi
+    # 2) PID 文件（run.sh 写入）——不依赖任何外部命令，精简系统兜底
+    local pf="logs/server_${p}.pid"
+    if [ -f "$pf" ]; then
+        local rpid
+        rpid="$(cat "$pf" 2>/dev/null || true)"
+        if [ -n "$rpid" ] && kill -0 "$rpid" 2>/dev/null; then return 0; fi
+    fi
+    # 3) lsof / fuser（不一定装了）
+    if command -v lsof >/dev/null 2>&1 && [ -n "$(lsof -ti tcp:"$p" 2>/dev/null)" ]; then return 0; fi
     if command -v fuser >/dev/null 2>&1 && fuser "$p/tcp" >/dev/null 2>&1; then return 0; fi
     return 1
 }
@@ -42,12 +51,35 @@ is_listening() {
 server_pids() {
     local p="$1"
     local out=""
-    if command -v lsof >/dev/null 2>&1; then out="$out $(lsof -ti tcp:"$p" 2>/dev/null || true)"; fi
-    if command -v fuser >/dev/null 2>&1; then out="$out $(fuser "$p/tcp" 2>/dev/null || true)"; fi
+    # lsof -t 只输出纯 PID
+    if command -v lsof >/dev/null 2>&1; then
+        out="$out $(lsof -ti tcp:"$p" 2>/dev/null | grep -E '^[0-9]+$' || true)"
+    fi
+    # ⚠️ fuser 输出 "8080/tcp:  <PID>  <命令>"，PID 在第 2 个字段。
+    #    直接按空格拆会把 "8080/tcp:" 和命令名也当成 PID，
+    #    status 就会打印出根本不存在的进程；也不能用 tr 过滤，
+    #    因为端口号本身也是纯数字，会被误当 PID。
+    if command -v fuser >/dev/null 2>&1; then
+        out="$out $(fuser "$p/tcp" 2>/dev/null | awk '{ if ($2 ~ /^[0-9]+$/) print $2 }' || true)"
+    fi
+    # ss -ltnp 里的 users:(("python",pid=12345,fd=3))，提取 pid= 后面的数字
     if command -v ss >/dev/null 2>&1; then
         out="$out $(ss -ltnp 2>/dev/null | awk -v pp=":$p" 'index($0,pp){n=split($6,a,","); for(i=1;i<=n;i++){if(a[i]~/pid=/){gsub(/[^0-9]/,"",a[i]); if(a[i]!="")print a[i]}}}' || true)"
     fi
-    printf '%s\n' $out | sort -u | grep -v '^$'
+    # PID 文件兜底（服务器无 lsof/fuser/ss 时）
+    local pf="logs/server_${p}.pid"
+    if [ -f "$pf" ]; then
+        local rpid
+        rpid="$(cat "$pf" 2>/dev/null || true)"
+        if [ -n "$rpid" ] && kill -0 "$rpid" 2>/dev/null; then
+            case "$(ps -p "$rpid" -o args= 2>/dev/null || true)" in
+                *server.py*) out="$out $rpid" ;;
+            esac
+        fi
+    fi
+    # 最终只保留纯数字 PID。
+    # grep 无匹配时退出码为 1，keepalive.sh 用了 set -e，必须兜住
+    printf '%s\n' $out | grep -E '^[0-9]+$' | sort -u || true
 }
 
 supervisor_alive() {
