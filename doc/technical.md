@@ -92,3 +92,6 @@ pip download --dest wheels_linux_arm64 \
 ```bash
 python3 -m tests.test_extractor          # 提取规则单测（权威 OCR 夹具）
 ```
+
+**测试环境**：`http://10.237.179.21:8080/`（网页界面；接口 `POST /recognize`、`GET /health`）
+

@@ -128,6 +128,35 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 ---
 
+## CentOS 7 环境适配说明（依赖版本锁定）
+
+目标部署机多为 CentOS 7 等老系统（GLIBC 2.17），只能使用 `manylinux_2_17` 的 wheel。为在该环境下稳定运行，以下依赖版本被**锁定**（锁定逻辑内置在 `build-linux-runtime.sh` 的自动下载里；`wheels_linux_x86_64/` 不入 git，联网按需下载）：
+
+| 依赖 | 锁定版本 | 说明 |
+| --- | --- | --- |
+| onnxruntime | **1.16.3** | `manylinux_2_17` 下 pip 可解析到的最高版本；由 NumPy 1.x 编译 |
+| numpy | **1.26.4** | 必须 <2，与 onnxruntime 1.16.3 的 C-API 兼容 |
+| opencv-python-headless | **4.10.0.84** | 用 headless 替代官方 opencv-python：服务器无显示环境；且 5.x 强制要求 NumPy≥2，与 onnxruntime 冲突 |
+| rapidocr_onnxruntime | **1.4.4** | 其依赖声明已由 `opencv-python` 改写为 `opencv-python-headless` |
+
+> **不要自行升级以上版本**，否则会触发兼容问题：
+>
+> - `onnxruntime` 升到 1.19+：不再提供 `manylinux_2_17` 轮子（改用更高的 manylinux/GLIBC 标签），CentOS 7 无法加载。
+> - `numpy` 升到 2.x：onnxruntime 1.16.3 崩溃，报 `AttributeError: _ARRAY_API not found` / `numpy.core.multiarray failed to import`。
+> - 用官方 `opencv-python`（非 headless）：服务器缺 Qt/X11 系统库，报 `ImportError: libxcb.so.1: cannot open shared object file`。
+>
+> 若目标机确为 Ubuntu 等新系统（GLIBC≥2.28），可放宽为 `numpy>=2` + `opencv-python-headless`(5.x) + 新版 onnxruntime。
+
+## 部署/构建注意事项（macOS → CentOS 7）
+
+- **打包**：`pack.sh` 已剥离 macOS 扩展属性（`--no-xattrs --no-fflags`）。若不剥离，包内会携带
+  `LIBARCHIVE.xattr.com.apple.provenance` 等 PAX 扩展头，CentOS 老版 GNU tar 解压时误解析，
+  导致 `-coloredlogs` 之类的前导 `-` 目录名、甚至文件内容字节错位。
+- **构建**：`build-linux-runtime.sh` 在 `wheels_linux_x86_64/` 缺失/为空时会联网自动下载，并完成上述
+  版本锁定与 headless 切换；纯内网机器可先在联网机器上执行 `pip download` 填充该目录，再拷进内网离线构建。
+
+---
+
 ## 附录
 
 - 核心技术细节（OCR 后端、提取规则、项目结构、Python 版本、部署细节、服务进程管理、测试）：**[doc/technical.md](doc/technical.md)**
