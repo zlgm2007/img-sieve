@@ -130,4 +130,5 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 ## 附录
 
-核心技术细节（OCR 后端、提取规则、项目结构、Python 版本、部署细节、服务进程管理、测试）见 **[doc/technical.md](doc/technical.md)**。
+- 核心技术细节（OCR 后端、提取规则、项目结构、Python 版本、部署细节、服务进程管理、测试）：**[doc/technical.md](doc/technical.md)**
+- HTTP 接口对接（/recognize 入参、出参、错误码）：**[doc/http-api.md](doc/http-api.md)**
