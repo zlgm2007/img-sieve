@@ -33,5 +33,8 @@ logs/
 #idea
 .idea/
 
+# WorkBuddy 本地工作数据（记忆、日志等，不应提交）
+.workbuddy/
+
 #deploy
 deploy/
