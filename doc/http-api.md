@@ -101,13 +101,16 @@ print(resp.json())
 ## Java 对接示例（Spring 生态）
 
 Java 侧用 `org.springframework.web.multipart.MultipartFile` 封装图片文件，
+
 再用 `RestTemplate` 以 `multipart/form-data` POST 到 `/recognize`。
 
 **Maven 依赖**：`spring-web`（`MultipartFile`、`RestTemplate`）、`spring-boot-starter-web`。
 
 **客户端调用工具类：**
 
-```java
+
+
+```
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -159,7 +162,9 @@ public class ImgSieveClient {
 
 **Spring Controller 接收 + 转发（前端把两张图 multipart 传给你的 Java 服务，Java 再调 img-sieve）：**
 
-```java
+
+
+```
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -179,7 +184,9 @@ public class ImgSieveController {
 
 **解析返回 JSON（Jackson）：**
 
-```java
+
+
+```
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -193,7 +200,9 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 
 > 图片仅在前端 → Java → img-sieve 之间流转，img-sieve 识别完即清理临时文件，图片不出内网。
 
----
+
+
+***
 
 ### 出参
 
@@ -248,29 +257,17 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 | `data.nickname_check.consistent`    | boolean\|null | 与 `data.nickname_consistent` 等价                           |
 
 > 小红书样例：
->
 > `platform`
->
->  为 
->
+> 为
 > `xiaohongshu`
->
-> ，账号存于 
->
+> ，账号存于
 > `xiaohongshu_id`
->
-> （如 
->
+> （如
 > `1346204393`
->
 > ），
->
 > `douyin_id`
->
->  为 
->
+> 为
 > `null`
->
 > 。
 
 

@@ -283,7 +283,7 @@ def build_result(results, explicit_roles=None):
     返回 {
         "user": {"nickname":..., "douyin_id":...},
         "phone": "18*********",
-        "chat_object_name": "多金小肉肉",
+        "chat_object_name": "多金***",
         "nickname_check": {
             "user": ..., "chat": ...,
             "compare_chars": 5,
