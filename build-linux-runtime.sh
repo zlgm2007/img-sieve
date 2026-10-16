@@ -27,14 +27,16 @@ if [ ! -d "$WHEEL_DIR" ] || ! compgen -G "$WHEEL_DIR/*.whl" >/dev/null 2>&1; the
         --only-binary=:all: \
         rapidocr_onnxruntime
 
-    # 目标机多为无显示服务器，官方 opencv-python 自带 Qt/X11，加载时缺 libxcb 等库会崩。
-    # 故强制改用 opencv-python-headless，并同步把 rapidocr 的依赖声明改写为 headless。
-    rm -f "$WHEEL_DIR"/opencv_python-*.whl
+    # 目标机多为无显示服务器：官方 opencv-python 自带 Qt/X11，加载时缺 libxcb 等库会崩，改 headless。
+    # 关键约束：manylinux_2_17(GLIBC2.17/CentOS7) 下 onnxruntime 只能解析到 1.16.3(由 numpy1.x 编译)，
+    # 因此整链必须锁定 numpy1.x：opencv-python-headless 用 4.x、numpy 用 1.26.x，才能与 onnxruntime 兼容。
+    # 若用最新的 headless5.x / numpy2.x，onnxruntime 导入会报 "_ARRAY_API not found"。
+    rm -f "$WHEEL_DIR"/opencv_python-*.whl "$WHEEL_DIR"/numpy-2*.whl
     python3 -m pip download --dest "$WHEEL_DIR" --no-deps \
         --platform manylinux_2_17_x86_64 \
         --python-version 311 \
         --only-binary=:all: \
-        opencv-python-headless
+        'opencv-python-headless==4.10.0.84' 'numpy==1.26.4'
     python3 - "$WHEEL_DIR" <<'PY'
 import glob, os, re, sys, zipfile, tempfile, shutil
 whl = glob.glob(os.path.join(sys.argv[1], "rapidocr_onnxruntime-*.whl"))[0]
