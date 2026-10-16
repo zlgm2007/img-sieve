@@ -28,6 +28,7 @@ web/_shots/
 
 # 日志
 *.log
+logs/
 
 #idea
 .idea/

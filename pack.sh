@@ -13,7 +13,7 @@
 #   ├── wheels_linux_x86_64/   # Linux x86_64 wheel（Python 3.11）
 #   ├── install.sh             # 目标机离线安装
 #   ├── run.sh                 # 目标机启动服务
-#   └── raw/                   # 样例图片（可选）
+#   └── web/                   # 网页界面
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -53,10 +53,6 @@ cp -R "$WHEEL_DIR" "$STAGE/"
 # 2b) 自包含 Linux 运行时（可选，服务器无 Python 时使用，由 build-linux-runtime.sh 产出）
 if [ -d runtime ]; then
     cp -R runtime "$STAGE/"
-fi
-# 3) 样例图（可选，便于目标机自测）
-if [ -d raw ]; then
-    cp -R raw "$STAGE/"
 fi
 
 # 清理 __pycache__ 与自检截图产物

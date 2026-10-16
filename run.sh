@@ -7,6 +7,15 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 日志目录：确保 logs/ 存在；前台(终端)运行时把全部输出同时落到控制台与 logs/server.log。
+LOG_DIR="logs"
+mkdir -p "$LOG_DIR"
+if [ -t 1 ]; then
+    # 前台：重跑自身，stdout 经 tee 同时写控制台 + server.log。
+    # 重跑后 stdout 变为管道(非终端)，不会再进入本分支，避免递归。
+    exec "$0" "$@" 2>&1 | tee -a "$LOG_DIR/server.log"
+fi
+
 # 项目标识横幅
 print_banner() {
     echo "[img-sieve] 工具: img-sieve —— 抖音 / 小红书截图信息提取服务"
