@@ -1,0 +1,1 @@
+sudo mkdir -p /opt/server && sudo chown snsoadmin:snsoadmin /opt/server

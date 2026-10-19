@@ -6,10 +6,10 @@
 
 ## 核心亮点
 
-* **支持抖音 + 小红书**：一套 RapidOCR（PP-OCR v4）自动区分平台，无需分别部署
-* **中文识别准**：RapidOCR 内置 ONNX 模型，昵称 / 账号 / 手机号实测准确
-* **零联网**：运行时全程无网络请求，适合纯内网
-* **开箱即用**：自包含 Linux 运行时，服务器无需安装 Python
+- **支持抖音 + 小红书**：一套 RapidOCR（PP-OCR v4）自动区分平台，无需分别部署
+- **中文识别准**：RapidOCR 内置 ONNX 模型，昵称 / 账号 / 手机号实测准确
+- **零联网**：运行时全程无网络请求，适合纯内网
+- **开箱即用**：自包含 Linux 运行时，服务器无需安装 Python
 
 ---
 
@@ -23,15 +23,14 @@
 
 页面即展示昵称、抖音号 / 小红书号、手机号，以及昵称是否一致。
 
+| 抖音     | 小红书     |
+| ------ | ------- |
+| 抖音识别界面 | 小红书识别界面 |
 
-| 抖音                                  | 小红书                               |
-| ------------------------------------- | ------------------------------------ |
-| ![抖音识别界面](doc/image/douyin.png) | ![小红书识别界面](doc/image/xhs.png) |
+- 左：识别「叫我大猫 /jiaowodamao996 / 手机号」，昵称一致 ✅
+- 右：识别「滴滴嗒哒 / 小红书号 / 手机号」，昵称不一致（滴滴嗒哒 ≠ 一休的馒头）
 
-* 左：识别「叫我大猫 /jiaowodamao996 / 手机号」，昵称一致 ✅
-* 右：识别「滴滴嗒哒 / 小红书号 / 手机号」，昵称不一致（滴滴嗒哒 ≠ 一休的馒头）
-
-> 网页为单文件自包含（内联样式与脚本，无外部资源）。接口：
+> 网页为单文件自包含（内联样式与脚本，无外部资源）。接口：  
 > `GET /`
 >
 > 网页界面・
@@ -90,7 +89,7 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 >
 > `true/false/null`
 >
-> ），
+> ），  
 > 等价于
 >
 > `data.nickname_check.consistent`
@@ -99,7 +98,7 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 >
 > **5 位前缀匹配**
 >
-> ，容忍昵称过长被截断。
+> ，容忍昵称过长被截断。  
 > 小红书平台：
 >
 > `user.platform`
@@ -184,18 +183,40 @@ EOF
 tail -f logs/worker.log  # 异步识别日志
 ```
 
+### 3. crontab 定时任务（开机自启 + 每日清理）
+
+`keepalive.sh start` 本身是常驻守护循环（每 5 秒自检、崩溃自动拉起），**不用 cron 周期调用**。只需要两条 cron：
+
+```bash
+crontab -e
+```
+
+加入：
+
+```cron
+# 开机后自动拉起 img-sieve（HTTP + worker + 保活守护）
+@reboot /opt/server/img-sieve/keepalive.sh start >> /opt/server/img-sieve/logs/cron.log 2>&1
+
+# 每天凌晨 3 点清理 7 天前的历史任务和图片
+0 3 * * * curl -s -X POST 'http://127.0.0.1:8080/admin/purge?days=7' >> /opt/server/img-sieve/logs/cron.log 2>&1
+```
+
+- `@reboot`：服务器重启后自动拉起服务，不用登录手动启动；keepalive.sh 自己会 `source .env`，worker 也能拿到 MySQL 配置。
+- 第二条：每天清理 7 天前的任务记录和图片 BLOB，避免 MySQL 越来越大。若设了 `IMG_SIEVE_ADMIN_TOKEN`，URL 后加 `&token=xxx`。
+- 验证：`crontab -l` 能看到这两条；输出在 `logs/cron.log`。
+
 ---
 
 ## CentOS 7 环境适配说明（依赖版本锁定）
 
 目标部署机多为 CentOS 7 等老系统（GLIBC 2.17），只能使用 `manylinux_2_17` 的 wheel。为在该环境下稳定运行，以下依赖版本被**锁定**（锁定逻辑内置在 `build-linux-runtime.sh` 的自动下载里；`wheels_linux_x86_64/` 不入 git，联网按需下载）：
 
-| 依赖 | 锁定版本 | 说明 |
-| --- | --- | --- |
-| onnxruntime | **1.16.3** | `manylinux_2_17` 下 pip 可解析到的最高版本；由 NumPy 1.x 编译 |
-| numpy | **1.26.4** | 必须 <2，与 onnxruntime 1.16.3 的 C-API 兼容 |
+| 依赖                     | 锁定版本          | 说明                                                                         |
+| ---------------------- | ------------- | -------------------------------------------------------------------------- |
+| onnxruntime            | **1.16.3**    | `manylinux_2_17` 下 pip 可解析到的最高版本；由 NumPy 1.x 编译                            |
+| numpy                  | **1.26.4**    | 必须 <2，与 onnxruntime 1.16.3 的 C-API 兼容                                      |
 | opencv-python-headless | **4.10.0.84** | 用 headless 替代官方 opencv-python：服务器无显示环境；且 5.x 强制要求 NumPy≥2，与 onnxruntime 冲突 |
-| rapidocr_onnxruntime | **1.4.4** | 其依赖声明已由 `opencv-python` 改写为 `opencv-python-headless` |
+| rapidocr_onnxruntime   | **1.4.4**     | 其依赖声明已由 `opencv-python` 改写为 `opencv-python-headless`                       |
 
 > **不要自行升级以上版本**，否则会触发兼容问题：
 >
@@ -207,10 +228,10 @@ tail -f logs/worker.log  # 异步识别日志
 
 ## 部署/构建注意事项（macOS → CentOS 7）
 
-- **打包**：`pack.sh` 已剥离 macOS 扩展属性（`--no-xattrs --no-fflags`）。若不剥离，包内会携带
-  `LIBARCHIVE.xattr.com.apple.provenance` 等 PAX 扩展头，CentOS 老版 GNU tar 解压时误解析，
+- **打包**：`pack.sh` 已剥离 macOS 扩展属性（`--no-xattrs --no-fflags`）。若不剥离，包内会携带  
+  `LIBARCHIVE.xattr.com.apple.provenance` 等 PAX 扩展头，CentOS 老版 GNU tar 解压时误解析，  
   导致 `-coloredlogs` 之类的前导 `-` 目录名、甚至文件内容字节错位。
-- **构建**：`build-linux-runtime.sh` 在 `wheels_linux_x86_64/` 缺失/为空时会联网自动下载，并完成上述
+- **构建**：`build-linux-runtime.sh` 在 `wheels_linux_x86_64/` 缺失/为空时会联网自动下载，并完成上述  
   版本锁定与 headless 切换；纯内网机器可先在联网机器上执行 `pip download` 填充该目录，再拷进内网离线构建。
 
 ---
