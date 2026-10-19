@@ -196,6 +196,72 @@ def get_task(task_id: str) -> dict | None:
         conn.close()
 
 
+def record_sync_task(image1: bytes, image1_name: str,
+                     image2: bytes | None, image2_name: str | None,
+                     result_json: str, backend: str | None) -> str:
+    """同步识别完成后直接写一条 done 记录（让任务记录页能查到同步数据）。"""
+    task_id = uuid.uuid4().hex
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO ocr_task "
+                "(task_id, status, created_at, finished_at, backend, "
+                " image1, image1_name, image2, image2_name, result_json) "
+                "VALUES (%s,'done',NOW(3),NOW(3),%s,%s,%s,%s,%s,%s)",
+                (task_id, backend, image1, image1_name,
+                 image2, image2_name, result_json))
+        conn.commit()
+        return task_id
+    finally:
+        conn.close()
+
+
+def get_task_images(task_id: str) -> dict | None:
+    """取任务的两张图片 BLOB 及类型，用于列表缩略图/大图查看。"""
+    conn = connect()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            cur.execute(
+                "SELECT image1, image1_type, image2, image2_type "
+                "FROM ocr_task WHERE task_id=%s", (task_id,))
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def list_tasks(start: str | None = None, end: str | None = None,
+               page: int = 1, per_page: int = 20):
+    """按 created_at 倒序分页查询任务列表（不含图片 BLOB / 大结果 JSON）。
+
+    start/end 形如 'YYYY-MM-DD HH:MM:SS'，可选。
+    返回 (total, items)。
+    """
+    where, params = [], []
+    if start:
+        where.append("created_at >= %s"); params.append(start)
+    if end:
+        where.append("created_at <= %s"); params.append(end)
+    wsql = (" WHERE " + " AND ".join(where)) if where else ""
+    page = max(1, int(page))
+    per_page = max(1, int(per_page))
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM ocr_task" + wsql, params)
+            total = cur.fetchone()[0]
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            cur.execute(
+                "SELECT task_id, status, backend, created_at, finished_at, error_msg "
+                "FROM ocr_task" + wsql +
+                " ORDER BY created_at DESC LIMIT %s OFFSET %s",
+                params + [per_page, (page - 1) * per_page])
+            items = cur.fetchall()
+        return total, items
+    finally:
+        conn.close()
+
+
 def purge_old(days: int) -> int:
     """删除 N 天以前的任务（含图片 BLOB），返回删除条数。"""
     conn = connect()
