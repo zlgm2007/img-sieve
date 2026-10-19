@@ -10,63 +10,42 @@
 
 **测试环境**：`http://10.237.179.21:8080/`（网页界面；接口 `POST /recognize`、`GET /health`）
 
-
-
 ```
 ./run.sh --host 0.0.0.0 --port 8080
 ```
 
-
-
-***
+---
 
 ## 接口一览
 
+| 方法     | 路径                    | 说明                                    |
+| ------ | --------------------- | ------------------------------------- |
+| `GET`  | `/`                   | 网页界面（上传两张图 + 展示识别结果）                  |
+| `POST` | `/recognize`          | 上传图片识别，返回结构化 JSON（**核心接口**，同步阻塞）      |
+| `POST` | `/recognize/async`    | 异步识别：收图立即返回 `task_id`，后台识别（**多机部署用**） |
+| `GET`  | `/task/{task_id}`     | 按 task_id 查询异步任务状态与识别结果               |
+| `POST` | `/admin/purge?days=N` | 清理 N 天前的历史任务与图片（运维）                   |
+| `GET`  | `/health`             | 健康检查                                  |
 
-
-| 方法     | 路径           | 说明                          |
-| ------ | ------------ | --------------------------- |
-| `GET`  | `/`          | 网页界面（上传两张图 + 展示识别结果）        |
-| `POST` | `/recognize` | 上传图片识别，返回结构化 JSON（**核心接口**，同步阻塞） |
-| `POST` | `/recognize/async` | 异步识别：收图立即返回 `task_id`，后台识别（**多机部署用**） |
-| `GET`  | `/task/{task_id}` | 按 task_id 查询异步任务状态与识别结果 |
-| `POST` | `/admin/purge?days=N` | 清理 N 天前的历史任务与图片（运维） |
-| `GET`  | `/health`    | 健康检查                        |
-
-
-
-***
+---
 
 ## 核心接口：POST /recognize
 
 ### 入参
 
-
-
-* **Content-Type**：`multipart/form-data`
-
-* **请求体大小**：1 \~ 50MB（超过 50MB 拒绝）
-
-* **图片字段**：上传图片文件（2 张，至少 1 张）
-
-
-  * **字段名任意**，服务按图片内容自动判断角色（主页 / 对话框）
-
-  * 支持的图片格式：`.jpg / .jpeg / .png / .webp / .bmp / .gif`（按文件头校验）
-
-* **角色覆盖（可选）**：表单文本字段 `role=<字段名>:user|chat`，人工指定某字段的角色
+- **Content-Type**：`multipart/form-data`
+- **请求体大小**：1 ~ 50MB（超过 50MB 拒绝）
+- **图片字段**：上传图片文件（2 张，至少 1 张）
+  - **字段名任意**，服务按图片内容自动判断角色（主页 / 对话框）
+  - 支持的图片格式：`.jpg / .jpeg / .png / .webp / .bmp / .gif`（按文件头校验）
+- **角色覆盖（可选）**：表单文本字段 `role=<字段名>:user|chat`，人工指定某字段的角色
 
 **角色自动判断规则**：
 
-
-
-* 图片文本中含「抖音号」或「小红书号」声明 → 角色 `user`（主页）
-
-* 图片文本中含 11 位大陆手机号 → 角色 `chat`（对话框）
+- 图片文本中含「抖音号」或「小红书号」声明 → 角色 `user`（主页）
+- 图片文本中含 11 位大陆手机号 → 角色 `chat`（对话框）
 
 **示例（curl）：**
-
-
 
 ```
 # 自动判断角色
@@ -84,8 +63,6 @@ curl -X POST http://127.0.0.1:8080/recognize \
 
 **示例（Python requests）：**
 
-
-
 ```
 import requests
 
@@ -99,9 +76,7 @@ resp = requests.post(
 print(resp.json())
 ```
 
-
-
-***
+---
 
 ## Java 对接示例（Spring 生态）
 
@@ -112,8 +87,6 @@ Java 侧用 `org.springframework.web.multipart.MultipartFile` 封装图片文件
 **Maven 依赖**：`spring-web`（`MultipartFile`、`RestTemplate`）、`spring-boot-starter-web`。
 
 **客户端调用工具类：**
-
-
 
 ```
 import org.springframework.core.io.ByteArrayResource;
@@ -167,8 +140,6 @@ public class ImgSieveClient {
 
 **Spring Controller 接收 + 转发（前端把两张图 multipart 传给你的 Java 服务，Java 再调 img-sieve）：**
 
-
-
 ```
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -189,8 +160,6 @@ public class ImgSieveController {
 
 **解析返回 JSON（Jackson）：**
 
-
-
 ```
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -205,15 +174,11 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 
 > 图片仅在前端 → Java → img-sieve 之间流转，img-sieve 识别完即清理临时文件，图片不出内网。
 
-
-
-***
+---
 
 ### 出参
 
 **成功（HTTP 200）：**
-
-
 
 ```
 {
@@ -242,56 +207,48 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 
 **字段说明：**
 
+| 字段                                  | 类型           | 说明                                                        |
+| ----------------------------------- | ------------ | --------------------------------------------------------- |
+| `code`                              | int          | 状态码，`0` 表示成功                                              |
+| `message`                           | string       | 状态描述                                                      |
+| `backend`                           | string       | 实际使用的 OCR 后端：`rapidocr` / `vision` / `tesseract` / `mock` |
+| `data.user.nickname`                | string|null  | 主页用户昵称                                                    |
+| `data.user.platform`                | string|null  | 平台：`douyin` / `xiaohongshu`                               |
+| `data.user.douyin_id`               | string|null  | 抖音号（抖音平台）                                                 |
+| `data.user.xiaohongshu_id`          | string|null  | 小红书号（小红书平台）                                               |
+| `data.phone`                        | string|null  | 对话框中的手机号                                                  |
+| `data.chat_object_name`             | string|null  | 对话框对象昵称                                                   |
+| `data.nickname_consistent`          | boolean|null | 主页昵称与对话框对象昵称是否一致（`true` 一致 / `false` 不一致 / `null` 缺失无法判断） |
+| `data.nickname_check.user`          | string|null  | 主页昵称（比对用）                                                 |
+| `data.nickname_check.chat`          | string|null  | 对话框对象昵称（比对用）                                              |
+| `data.nickname_check.compare_chars` | int          | 比对长度（固定 `5`，前 5 位前缀匹配）                                    |
+| `data.nickname_check.consistent`    | boolean|null | 与 `data.nickname_consistent` 等价                           |
 
-
-| 字段                                  | 类型            | 说明                                                        |
-| ----------------------------------- | ------------- | --------------------------------------------------------- |
-| `code`                              | int           | 状态码，`0` 表示成功                                              |
-| `message`                           | string        | 状态描述                                                      |
-| `backend`                           | string        | 实际使用的 OCR 后端：`rapidocr` / `vision` / `tesseract` / `mock` |
-| `data.user.nickname`                | string\|null  | 主页用户昵称                                                    |
-| `data.user.platform`                | string\|null  | 平台：`douyin` / `xiaohongshu`                               |
-| `data.user.douyin_id`               | string\|null  | 抖音号（抖音平台）                                                 |
-| `data.user.xiaohongshu_id`          | string\|null  | 小红书号（小红书平台）                                               |
-| `data.phone`                        | string\|null  | 对话框中的手机号                                                  |
-| `data.chat_object_name`             | string\|null  | 对话框对象昵称                                                   |
-| `data.nickname_consistent`          | boolean\|null | 主页昵称与对话框对象昵称是否一致（`true` 一致 / `false` 不一致 / `null` 缺失无法判断） |
-| `data.nickname_check.user`          | string\|null  | 主页昵称（比对用）                                                 |
-| `data.nickname_check.chat`          | string\|null  | 对话框对象昵称（比对用）                                              |
-| `data.nickname_check.compare_chars` | int           | 比对长度（固定 `5`，前 5 位前缀匹配）                                    |
-| `data.nickname_check.consistent`    | boolean\|null | 与 `data.nickname_consistent` 等价                           |
-
-> 小红书样例：
-> `platform`
-> 为
-> `xiaohongshu`
-> ，账号存于
-> `xiaohongshu_id`
-> （如
-> `1346204393`
-> ），
-> `douyin_id`
-> 为
-> `null`
+> 小红书样例：  
+> `platform`  
+> 为  
+> `xiaohongshu`  
+> ，账号存于  
+> `xiaohongshu_id`  
+> （如  
+> `1346204393`  
+> ），  
+> `douyin_id`  
+> 为  
+> `null`  
 > 。
 
-
-
-***
+---
 
 ### 错误返回
 
-
-
-| HTTP 状态 | code  | 触发条件                                                    |
-| ------- | ----- | ------------------------------------------------------- |
-| `400`   | `400` | 不是 `multipart/form-data`；请求体大小超出 1\~50MB；字段不是有效图片；未上传图片 |
-| `404`   | `404` | 请求了不存在的路径                                               |
-| `500`   | `500` | OCR 后端初始化 / 运行失败（如 rapidocr 不可用且无备用后端）                  |
+| HTTP 状态 | code  | 触发条件                                                   |
+| ------- | ----- | ------------------------------------------------------ |
+| `400`   | `400` | 不是 `multipart/form-data`；请求体大小超出 1~50MB；字段不是有效图片；未上传图片 |
+| `404`   | `404` | 请求了不存在的路径                                              |
+| `500`   | `500` | OCR 后端初始化 / 运行失败（如 rapidocr 不可用且无备用后端）                 |
 
 错误响应示例：
-
-
 
 ```
 { "code": 400, "message": "请使用 multipart/form-data 上传图片" }
@@ -299,35 +256,24 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 { "code": 404, "message": "not found" }
 ```
 
-
-
-***
+---
 
 ## 健康检查：GET /health
-
-
 
 ```
 { "code": 0, "message": "ok", "status": "up" }
 ```
 
-
-
-***
+---
 
 ## 对接注意事项
 
+- 返回 `Content-Type: application/json; charset=utf-8`，`Cache-Control: no-store`。
+- 图片仅在服务端内存 / 临时文件中处理，识别完成后临时文件自动清理，图片不出内网。
+- 服务支持并发请求（`ThreadingHTTPServer` 每请求一线程）。
+- 启动时可用 `--backend` 强制指定 OCR 后端（`rapidocr|vision|tesseract|mock`），默认自动选择。
 
-
-* 返回 `Content-Type: application/json; charset=utf-8`，`Cache-Control: no-store`。
-
-* 图片仅在服务端内存 / 临时文件中处理，识别完成后临时文件自动清理，图片不出内网。
-
-* 服务支持并发请求（`ThreadingHTTPServer` 每请求一线程）。
-
-* 启动时可用 `--backend` 强制指定 OCR 后端（`rapidocr|vision|tesseract|mock`），默认自动选择。
-
-***
+---
 
 ## 异步识别（多机部署）
 
@@ -376,17 +322,18 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 
 **字段说明：**
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `code` | int | `0` 成功；`404` 任务不存在；`500` MySQL 连接失败 |
-| `task_id` | string | 任务 ID |
-| `status` | string | `pending` / `processing` / `done` / `failed` |
-| `created_at` | string | 提交时间 |
-| `started_at` | string\|null | worker 开始识别时间 |
-| `finished_at` | string\|null | 识别完成时间 |
-| `backend` | string\|null | 实际 OCR 后端 |
-| `result` | object\|null | 识别结果，结构同 `/recognize` 的返回（含 `data`）；未完成时为 `null` |
-| `error` | string\|null | 失败原因；成功时为 `null` |
+| 字段            | 类型          | 说明                                               |
+| ------------- | ----------- | ------------------------------------------------ |
+| `code`        | int         | `0` 成功；`404` 任务不存在；`500` MySQL 连接失败              |
+| `task_id`     | string      | 任务 ID                                            |
+| `status`      | string      | `pending` / `processing` / `done` / `failed`     |
+| `created_at`  | string      | 提交时间                                             |
+| `started_at`  | string|null | worker 开始识别时间                                    |
+| `finished_at` | string|null | 识别完成时间                                           |
+| `backend`     | string|null | 实际 OCR 后端                                        |
+| `result`      | object|null | 识别结果，结构同 `/recognize` 的返回（含 `data`）；未完成时为 `null` |
+| `error`       | string|null | 失败原因；成功时为 `null`                                 |
+
 
 建议轮询间隔 **1~2 秒**；识别完成（`status=done`）后停止轮询。单图识别约数秒（取决于服务器 CPU）。
 
