@@ -37,6 +37,8 @@ if [ ! -d "$WHEEL_DIR" ] || ! compgen -G "$WHEEL_DIR/*.whl" >/dev/null 2>&1; the
         --python-version 311 \
         --only-binary=:all: \
         'opencv-python-headless==4.10.0.84' 'numpy==1.26.4'
+    # 异步任务用的 MySQL 驱动（纯 Python wheel，无系统库依赖）
+    python3 -m pip download --dest "$WHEEL_DIR" --no-deps pymysql
     python3 - "$WHEEL_DIR" <<'PY'
 import glob, os, re, sys, zipfile, tempfile, shutil
 whl = glob.glob(os.path.join(sys.argv[1], "rapidocr_onnxruntime-*.whl"))[0]
@@ -140,13 +142,13 @@ if [ "$OS" = "Linux" ]; then
     [ -n "$PYPY" ] && [ -x "$PYPY" ] || { echo "[build] 错误: 未找到可执行的 python。"; exit 1; }
     echo "[build]    使用: $PYPY ($("$PYPY" -V 2>&1))"
     "$PYPY" -m ensurepip --upgrade >/dev/null 2>&1 || true
-    "$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime
+    "$PYPY" -m pip install --no-index --find-links wheels_linux_x86_64 rapidocr_onnxruntime pymysql
 else
     echo "[build]    当前系统: ${OS}（macOS/非Linux）→ 用本机 pip 跨平台安装 linux wheel"
     mkdir -p "$SP"
     python3 -m pip install --no-index --find-links wheels_linux_x86_64 \
         --platform manylinux2014_x86_64 --python-version 3.11 \
-        --only-binary=:all: --target "$SP" rapidocr_onnxruntime
+        --only-binary=:all: --target "$SP" rapidocr_onnxruntime pymysql
 fi
 
 # ---- 4) 整理为 runtime/ 并校验 ----

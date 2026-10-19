@@ -39,7 +39,7 @@ mkdir -p "$STAGE"
 
 # 1) 代码与脚本
 cp -R img_sieve "$STAGE/"
-cp cli.py server.py README.md install.sh run.sh stop.sh keepalive.sh "$STAGE/"
+cp cli.py server.py worker.py README.md install.sh run.sh stop.sh keepalive.sh .env.example "$STAGE/"
 # 1a) 网页界面
 if [ -d web ]; then
     cp -R web "$STAGE/"
@@ -75,6 +75,19 @@ rm -rf "$OUT_DIR/_stage"
 
 echo "[pack] 打包完成: $TARBALL"
 echo "[pack] 大小: $(du -h "$TARBALL" | cut -f1)"
+
+# 5) MySQL 5.7 离线包（仅当本地有 rpms/ 时才打；rpms 不进 git，见 .gitignore）
+if [ -d mysql-offline/rpms ] && compgen -G "mysql-offline/rpms/*.rpm" >/dev/null 2>&1; then
+    MYSQL_TARBALL="$OUT_DIR/mysql-offline-centos7.tar.gz"
+    # 确保脚本带可执行位，避免在 CentOS 上解压后 ./install.sh 报 Permission denied
+    chmod +x mysql-offline/*.sh
+    COPYFILE_DISABLE=1 tar --no-xattrs --no-fflags -czf "$MYSQL_TARBALL" mysql-offline
+    echo "[pack] MySQL 离线包: $MYSQL_TARBALL ($(du -h "$MYSQL_TARBALL" | cut -f1))"
+else
+    echo "[pack] 提示: 未找到 mysql-offline/rpms/*.rpm，跳过 MySQL 离线包。"
+    echo "        如需：在联网机器上 cd mysql-offline && ./download.sh 后再 pack。"
+fi
+
 echo "[pack] 部署到内网目标机:"
 echo "        1) 拷贝 $TARBALL 到目标机"
 echo "        2) tar -xzf $TARBALL && cd img-sieve"

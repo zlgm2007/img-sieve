@@ -26,7 +26,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from img_sieve import ocr
+from img_sieve import db, ocr
 from img_sieve.extractor import detect_roles
 from img_sieve.service import recognize
 
@@ -88,6 +88,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"code": 0, "message": "ok", "status": "up"})
         elif path in ("/", ""):
             self._serve_ui()
+        elif path.startswith("/task/"):
+            rest = path[len("/task/"):].strip("/")
+            parts = rest.split("/")
+            if len(parts) == 1:
+                self._handle_task_query(parts[0])
+            elif len(parts) == 3 and parts[1] == "image" and parts[2] in ("1", "2"):
+                self._handle_task_image(parts[0], parts[2])
+            else:
+                self._send_json({"code": 404, "message": "not found"}, 404)
+        elif path == "/admin/tasks":
+            self._handle_list_tasks()
         else:
             self._send_json({"code": 404, "message": "not found"}, 404)
 
@@ -106,6 +117,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/recognize":
             self._handle_recognize()
+        elif path == "/recognize/async":
+            self._handle_recognize_async()
+        elif path == "/admin/purge":
+            self._handle_admin_purge()
         else:
             self._send_json({"code": 404, "message": "not found"}, 404)
 
@@ -162,6 +177,16 @@ class Handler(BaseHTTPRequestHandler):
             elapsed_ms = (time.perf_counter() - t0) * 1000
             self._log(f"/recognize 识别成功, 耗时 {elapsed_ms:.1f} ms, "
                       f"图片={len(files)} 张, backend={self.backend or 'auto'}")
+            # 同步识别也写入 ocr_task，让任务记录页能查到（失败不影响主流程）
+            try:
+                b1 = files[0][1]; n1 = files[0][0]
+                b2 = files[1][1] if len(files) > 1 else b""
+                n2 = files[1][0] if len(files) > 1 else None
+                db.record_sync_task(b1, n1, b2, n2,
+                                    json.dumps(result, ensure_ascii=False),
+                                    self.backend or result.get("backend"))
+            except Exception as e:
+                self._log(f"/recognize 写任务记录失败（忽略）: {e}")
             self._send_json(result)
         finally:
             for p in tmp_paths:
@@ -169,6 +194,136 @@ class Handler(BaseHTTPRequestHandler):
                     os.remove(p)
                 except OSError:
                     pass
+
+    # ---------- 异步接口 ----------
+    def _handle_recognize_async(self):
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            self._send_json({"code": 400, "message": "请使用 multipart/form-data 上传图片"}, 400)
+            return
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0 or length > MAX_BODY:
+            self._send_json({"code": 400, "message": f"请求体大小需在 1~{MAX_BODY} 字节之间"}, 400)
+            return
+        try:
+            files, _roles = self._parse_multipart(content_type, length)
+        except ValueError as e:
+            self._send_json({"code": 400, "message": str(e)}, 400)
+            return
+
+        image_files = [(n, d) for n, d in files if _is_image_bytes(d)]
+        if not image_files:
+            self._send_json({"code": 400, "message": "请至少上传 1 张图片"}, 400)
+            return
+
+        (n1, b1) = image_files[0]
+        (n2, b2) = image_files[1] if len(image_files) > 1 else (None, None)
+        try:
+            task_id = db.create_task(
+                b1, n1 or "image1.jpg", "image/jpeg",
+                b2 if b2 is not None else b"", n2 or "image2.jpg", "image/jpeg",
+                backend=self.backend)
+        except Exception as e:
+            self._log(f"/recognize/async 任务入库失败: {e}")
+            self._send_json({"code": 500, "message": f"任务入库失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        self._log(f"/recognize/async 已创建任务 {task_id}, 图片={len(image_files)} 张")
+        self._send_json({"code": 0, "message": "ok",
+                         "task_id": task_id, "status": "pending"})
+
+    def _handle_task_query(self, task_id):
+        if not task_id:
+            self._send_json({"code": 400, "message": "缺少 task_id"}, 400)
+            return
+        try:
+            row = db.get_task(task_id)
+        except Exception as e:
+            self._send_json({"code": 500, "message": f"查询失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        if not row:
+            self._send_json({"code": 404, "message": "任务不存在"}, 404)
+            return
+        result = None
+        if row.get("result_json"):
+            try:
+                result = json.loads(row["result_json"])
+            except Exception:
+                result = row["result_json"]
+        self._send_json({
+            "code": 0,
+            "task_id": task_id,
+            "status": row["status"],
+            "created_at": str(row["created_at"]),
+            "started_at": str(row["started_at"]) if row.get("started_at") else None,
+            "finished_at": str(row["finished_at"]) if row.get("finished_at") else None,
+            "backend": row.get("backend"),
+            "result": result,
+            "error": row.get("error_msg"),
+        })
+
+    def _handle_task_image(self, task_id, n):
+        try:
+            row = db.get_task_images(task_id)
+        except Exception as e:
+            self._send_json({"code": 500, "message": f"取图失败: {e}"}, 500)
+            return
+        if not row:
+            self._send_json({"code": 404, "message": "任务不存在"}, 404)
+            return
+        blob = row.get("image1") if n == "1" else row.get("image2")
+        ctype = row.get("image1_type") if n == "1" else row.get("image2_type")
+        if not blob:
+            self._send_json({"code": 404, "message": "无此图片"}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype or "image/jpeg")
+        self.send_header("Content-Length", str(len(blob)))
+        self.send_header("Cache-Control", "private, max-age=3600")
+        self.end_headers()
+        self.wfile.write(blob)
+
+    def _handle_list_tasks(self):
+        qs = urlparse(self.path).query
+        params = dict(kv.split("=", 1) for kv in qs.split("&") if "=" in kv)
+        from urllib.parse import unquote
+        start = unquote(params.get("start", "")) or None
+        end = unquote(params.get("end", "")) or None
+        try:
+            page = int(params.get("page", "1"))
+        except ValueError:
+            page = 1
+        try:
+            total, items = db.list_tasks(start=start, end=end, page=page, per_page=20)
+        except Exception as e:
+            self._send_json({"code": 500, "message": f"查询失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        # 时间转字符串便于 JSON
+        for it in items:
+            it["created_at"] = str(it["created_at"]) if it.get("created_at") else None
+            it["finished_at"] = str(it["finished_at"]) if it.get("finished_at") else None
+        self._send_json({
+            "code": 0, "total": total, "page": page, "per_page": 20,
+            "pages": (total + 19) // 20, "items": items,
+        })
+
+    def _handle_admin_purge(self):
+        expected = os.environ.get("IMG_SIEVE_ADMIN_TOKEN", "")
+        params = dict(kv.split("=", 1) for kv in urlparse(self.path).query.split("&") if "=" in kv)
+        if expected and params.get("token") != expected:
+            self._send_json({"code": 403, "message": "需要正确的 token（?token=...）"}, 403)
+            return
+        try:
+            days = int(params.get("days", "5"))
+        except ValueError:
+            self._send_json({"code": 400, "message": "days 需为整数"}, 400)
+            return
+        try:
+            n = db.purge_old(days)
+        except Exception as e:
+            self._send_json({"code": 500, "message": f"清理失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        self._log(f"/admin/purge 清理 {days} 天前任务，删除 {n} 条（含图片 BLOB）")
+        self._send_json({"code": 0, "message": "ok", "days": days, "deleted": n})
 
     def _parse_multipart(self, content_type, length):
         """解析 multipart，返回 (files, roles)。
@@ -227,10 +382,24 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     Handler.backend = args.backend
+
+    # 启动时尝试建表（异步功能需要 MySQL）。连不上只警告，不阻塞同步识别。
+    async_ready = False
+    try:
+        db.ensure_table()
+        async_ready = True
+    except Exception as e:
+        print(f"[img-sieve] 警告：MySQL 未连接/建表失败，异步接口不可用"
+              f"（同步识别仍可）: {e}")
+
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[img-sieve] 服务已启动: http://{args.host}:{args.port}")
     print(f"[img-sieve] OCR 后端: {args.backend or ocr.auto_driver([])}")
-    print(f"[img-sieve] 接口: POST /recognize, GET /health")
+    if async_ready:
+        print("[img-sieve] 同步: POST /recognize | 异步: POST /recognize/async, "
+              "GET /task/{task_id}, POST /admin/purge?days=N")
+    else:
+        print("[img-sieve] 同步: POST /recognize | GET /health")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -4,18 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>抖音截图信息识别</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230e9f8a'/%3E%3Cpath%20d='M8%2023V9h4.5l6%208.5V9H23v14h-4.5L12.5%2014.5V23z'%20fill='white'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32' height='32' rx='7' fill='%230e9f8a'/%3E%3Cpath d='M8 23V9h4.5l6 8.5V9H23v14h-4.5L12.5 14.5V23z' fill='white'/%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#f4f6f8; --card:#ffffff; --line:#e3e8ee; --ink:#1c2733;
     --muted:#64748b; --accent:#0e9f8a; --accent-ink:#ffffff;
-    --ok:#0e9f8a; --err:#d64545; --shadow:0 1px 2px rgba(20,30,45,.06),0 6px 20px rgba(20,30,45,.06);
+    --ok:#0e9f8a; --err:#d64545; --warn:#d97706; --shadow:0 1px 2px rgba(20,30,45,.06),0 6px 20px rgba(20,30,45,.06);
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
   body{background:var(--bg);color:var(--ink);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     -webkit-font-smoothing:antialiased;line-height:1.5}
+
+  /* ===== 布局：左侧菜单 + 主区 ===== */
+  .layout{display:flex;min-height:100vh}
+  .side{width:200px;background:var(--card);border-right:1px solid var(--line);padding:18px 0;flex:none}
+  .side .logo{font-weight:700;font-size:16px;padding:0 18px 18px;color:var(--accent)}
+  .menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:11px 18px;
+    font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-item:hover{background:#f4f6f8}
+  .menu-item.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  .main{flex:1;min-width:0}
+  @media (max-width:700px){
+    .layout{flex-direction:column}
+    .side{width:100%;display:flex;align-items:center;padding:8px 12px}
+    .side .logo{padding:0 12px 0 0;margin:0}
+    .menu-item{display:inline-block;width:auto;border-left:none;border-bottom:3px solid transparent;padding:8px 12px}
+    .menu-item.active{border-left:none;border-bottom-color:var(--accent)}
+  }
+
   .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
   header{padding:8px 0 18px}
   h1{font-size:22px;margin:0 0 4px;font-weight:700}
@@ -41,9 +59,9 @@
     display:none;align-items:center;justify-content:center;padding:0}
   .clear svg{width:12px;height:12px}
   .up.has-img .clear{display:flex}
-  .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+  .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px;align-items:center}
   button.primary{border:none;background:var(--accent);color:var(--accent-ink);padding:12px 26px;
-    border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:filter .15s}
+    border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:filter .15s;font-family:inherit}
   button.primary:hover{filter:brightness(.95)}
   button.primary:disabled{opacity:.5;cursor:not-allowed}
   .status{display:none;align-items:center;gap:8px;color:var(--muted);font-size:14px}
@@ -80,93 +98,224 @@
   .check small{font-weight:400;opacity:.8}
   .hide{display:none!important}
   footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+
+  /* ===== 异步页专用 ===== */
+  .taskbox{margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid var(--line);
+    border-radius:10px;font-size:13px;color:var(--muted);display:none}
+  .taskbox.on{display:block}
+  .taskbox b{color:var(--ink);font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px}
+  .badge.pending{background:#eef2f7;color:#64748b}
+  .badge.processing{background:#fef3e2;color:#b45309}
+  .badge.done{background:#e6f6f2;color:#0b7a68}
+  .badge.failed{background:#fdecec;color:#a22}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>截图信息识别</h1>
-    <p class="sub">上传主页截图与消息对话框截图，识别用户昵称、抖音号、小红书号与手机号码。图片仅本地处理。</p>
-  </header>
+<div class="layout">
+  <aside class="side">
+    <div class="logo">img-sieve</div>
+    <button class="menu-item active" data-page="sync" type="button">同步识别</button>
+    <button class="menu-item" data-page="async" type="button">异步识别</button>
+    <button class="menu-item" data-page="data" type="button">任务记录</button>
+  </aside>
+  <main class="main">
+  <div class="wrap">
+    <header>
+      <h1>截图信息识别</h1>
+      <p class="sub">上传主页截图与消息对话框截图，识别用户昵称、抖音号、小红书号与手机号码。图片仅本地处理。</p>
+    </header>
 
-  <section class="card">
-    <div class="grid">
-      <!-- 主页截图 -->
-      <div class="up" id="slotUser">
-        <div class="up-head">
-          <span class="up-title">主页截图</span>
-          <span class="up-hint">含「抖音号、小红书号」</span>
-        </div>
-        <div class="slot empty" id="dropUser" tabindex="0" role="button" aria-label="选择主页截图">
-          <div class="placeholder" id="phUser">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
-            点击或拖拽选择图片
+    <!-- ===================== 同步识别（原有功能） ===================== -->
+    <div id="page-sync">
+      <section class="card">
+        <div class="grid">
+          <div class="up" id="slotUser">
+            <div class="up-head">
+              <span class="up-title">主页截图</span>
+              <span class="up-hint">含「抖音号、小红书号」</span>
+            </div>
+            <div class="slot empty" id="dropUser" tabindex="0" role="button" aria-label="选择主页截图">
+              <div class="placeholder" id="phUser">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
+                点击或拖拽选择图片
+              </div>
+              <img id="preUser" class="hide" alt="主页截图预览">
+              <button class="clear" id="clearUser" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            </div>
+            <input type="file" id="fileUser" accept="image/*" hidden>
           </div>
-          <img id="preUser" class="hide" alt="主页截图预览">
-          <button class="clear" id="clearUser" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        </div>
-        <input type="file" id="fileUser" accept="image/*" hidden>
-      </div>
 
-      <!-- 对话框截图 -->
-      <div class="up" id="slotChat">
-        <div class="up-head">
-          <span class="up-title">对话框截图</span>
-          <span class="up-hint">含手机号码</span>
-        </div>
-        <div class="slot empty" id="dropChat" tabindex="0" role="button" aria-label="选择对话框截图">
-          <div class="placeholder" id="phChat">
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            点击或拖拽选择图片
+          <div class="up" id="slotChat">
+            <div class="up-head">
+              <span class="up-title">对话框截图</span>
+              <span class="up-hint">含手机号码</span>
+            </div>
+            <div class="slot empty" id="dropChat" tabindex="0" role="button" aria-label="选择对话框截图">
+              <div class="placeholder" id="phChat">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                点击或拖拽选择图片
+              </div>
+              <img id="preChat" class="hide" alt="对话框截图预览">
+              <button class="clear" id="clearChat" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            </div>
+            <input type="file" id="fileChat" accept="image/*" hidden>
           </div>
-          <img id="preChat" class="hide" alt="对话框截图预览">
-          <button class="clear" id="clearChat" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
-        <input type="file" id="fileChat" accept="image/*" hidden>
+
+        <div class="actions">
+          <button class="primary" id="btnRun" disabled>开始识别</button>
+          <div class="status" id="status"><span class="spinner"></span><span id="statusText">识别中…</span></div>
+        </div>
+      </section>
+
+      <div class="alert" id="alert"></div>
+
+      <section class="result hide" id="result">
+        <h2>识别结果</h2>
+        <div class="check on yes" id="checkBanner"><span class="dot"></span><span id="checkText"></span></div>
+        <div class="cards">
+          <div class="rcard"><div class="k">用户昵称</div><div class="v" id="vNick">—</div></div>
+          <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="vId">—</div></div>
+          <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="vObj">—</div></div>
+          <div class="rcard"><div class="k">手机号码</div><div class="v" id="vPhone">—</div></div>
+        </div>
+        <div class="raw"><pre id="rawJson"></pre></div>
+      </section>
+    </div>
+
+    <!-- ===================== 异步识别（多机/队列验证） ===================== -->
+    <div id="page-async" class="hide">
+      <section class="card">
+        <div class="grid">
+          <div class="up" id="aSlotUser">
+            <div class="up-head">
+              <span class="up-title">主页截图</span>
+              <span class="up-hint">含「抖音号、小红书号」</span>
+            </div>
+            <div class="slot empty" id="aDropUser" tabindex="0" role="button" aria-label="选择主页截图">
+              <div class="placeholder" id="aPhUser">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
+                点击或拖拽选择图片
+              </div>
+              <img id="aPreUser" class="hide" alt="主页截图预览">
+              <button class="clear" id="aClearUser" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            </div>
+            <input type="file" id="aFileUser" accept="image/*" hidden>
+          </div>
+
+          <div class="up" id="aSlotChat">
+            <div class="up-head">
+              <span class="up-title">对话框截图</span>
+              <span class="up-hint">含手机号码</span>
+            </div>
+            <div class="slot empty" id="aDropChat" tabindex="0" role="button" aria-label="选择对话框截图">
+              <div class="placeholder" id="aPhChat">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                点击或拖拽选择图片
+              </div>
+              <img id="aPreChat" class="hide" alt="对话框截图预览">
+              <button class="clear" id="aClearChat" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            </div>
+            <input type="file" id="aFileChat" accept="image/*" hidden>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="aBtn" disabled>提交异步任务</button>
+          <div class="status" id="aStatus"><span class="spinner"></span><span id="aStatusText">提交中…</span></div>
+        </div>
+
+        <div class="taskbox" id="aTaskBox">
+          任务 ID：<b id="aTaskId"></b><span class="badge pending" id="aBadge">pending</span><br>
+          <small id="aTaskMeta"></small>
+        </div>
+      </section>
+
+      <div class="alert" id="aAlert"></div>
+
+      <section class="result hide" id="aResult">
+        <h2>识别结果 <span class="badge done" id="aDoneBadge">done</span></h2>
+        <div class="check on unknown" id="aCheckBanner"><span class="dot"></span><span id="aCheckText"></span></div>
+        <div class="cards">
+          <div class="rcard"><div class="k">用户昵称</div><div class="v" id="aNick">—</div></div>
+          <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="aId">—</div></div>
+          <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="aObj">—</div></div>
+          <div class="rcard"><div class="k">手机号码</div><div class="v" id="aPhone">—</div></div>
+        </div>
+        <div class="raw"><pre id="aRawJson"></pre></div>
+      </section>
+    </div>
+
+    <!-- ===================== 任务记录（ocr_task 倒序分页查询） ===================== -->
+    <div id="page-data" class="hide">
+      <section class="card">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div>
+            <div class="up-hint" style="margin-bottom:4px">开始时间</div>
+            <input type="datetime-local" id="dStart" style="padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px">
+          </div>
+          <div>
+            <div class="up-hint" style="margin-bottom:4px">结束时间</div>
+            <input type="datetime-local" id="dEnd" style="padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px">
+          </div>
+          <button class="primary" id="dBtn" type="button" style="padding:10px 20px">查询</button>
+        </div>
+        <div class="taskbox on" id="dMeta" style="margin-top:14px"></div>
+        <div style="overflow:auto;margin-top:14px">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="text-align:left;color:var(--muted);border-bottom:1px solid var(--line)">
+                <th style="padding:8px 10px">任务ID</th>
+                <th style="padding:8px 10px">主页截图</th>
+                <th style="padding:8px 10px">对话框截图</th>
+                <th style="padding:8px 10px">状态</th>
+                <th style="padding:8px 10px">后端</th>
+                <th style="padding:8px 10px">创建时间</th>
+                <th style="padding:8px 10px">完成时间</th>
+                <th style="padding:8px 10px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="dRows"></tbody>
+          </table>
+        </div>
+        <div class="actions" style="justify-content:space-between">
+          <div class="status on" id="dPageInfo" style="display:flex"></div>
+          <div style="display:flex;gap:10px">
+            <button class="primary" id="dPrev" type="button" style="padding:8px 18px">上一页</button>
+            <button class="primary" id="dNext" type="button" style="padding:8px 18px">下一页</button>
+          </div>
+        </div>
+      </section>
+      <div class="alert" id="dAlert"></div>
+      <div class="raw" id="dDetailWrap" style="display:none">
+        <pre id="dDetail"></pre>
       </div>
     </div>
 
-    <div class="actions">
-      <button class="primary" id="btnRun" disabled>开始识别</button>
-      <div class="status" id="status"><span class="spinner"></span><span id="statusText">识别中…</span></div>
-    </div>
-  </section>
-
-  <div class="alert" id="alert"></div>
-
-  <section class="result hide" id="result">
-    <h2>识别结果</h2>
-    <div class="check on yes" id="checkBanner"><span class="dot"></span><span id="checkText"></span></div>
-    <div class="cards">
-      <div class="rcard"><div class="k">用户昵称</div><div class="v" id="vNick">—</div></div>
-      <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="vId">—</div></div>
-      <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="vObj">—</div></div>
-      <div class="rcard"><div class="k">手机号码</div><div class="v" id="vPhone">—</div></div>
-    </div>
-    <div class="raw"><pre id="rawJson"></pre></div>
-  </section>
-
-  <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · 管理员：周亮</footer>
+    <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · 管理员：周亮</footer>
+  </div>
+  </main>
 </div>
 
 <script>
 (function(){
   'use strict';
-  var fileUser=document.getElementById('fileUser'),
-      fileChat=document.getElementById('fileChat'),
-      preUser=document.getElementById('preUser'),
-      preChat=document.getElementById('preChat'),
-      phUser=document.getElementById('phUser'),
-      phChat=document.getElementById('phChat'),
-      slotUser=document.getElementById('slotUser'),
-      slotChat=document.getElementById('slotChat'),
-      dropUser=document.getElementById('dropUser'),
-      dropChat=document.getElementById('dropChat'),
-      btn=document.getElementById('btnRun'),
-      statusEl=document.getElementById('status'),
-      alertEl=document.getElementById('alert'),
-      resultEl=document.getElementById('result');
 
+  /* ---------- 菜单切换 ---------- */
+  var pages={sync:document.getElementById('page-sync'),
+             async:document.getElementById('page-async'),
+             data:document.getElementById('page-data')};
+  document.querySelectorAll('.menu-item').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.menu-item').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      var p=btn.getAttribute('data-page');
+      Object.keys(pages).forEach(function(k){ pages[k].classList.toggle('hide', k!==p); });
+    });
+  });
+
+  /* ---------- 通用上传槽绑定 ---------- */
   function setPreview(imgEl, placeholderEl, slotEl, file){
     if(!file){ placeholderEl.classList.remove('hide'); imgEl.classList.add('hide'); slotEl.classList.remove('has-img'); return; }
     placeholderEl.classList.add('hide');
@@ -174,10 +323,9 @@
     imgEl.src=URL.createObjectURL(file);
     slotEl.classList.add('has-img');
   }
-
-  function bindSlot(inputEl, dropEl, imgEl, placeholderEl, slotEl){
+  function bindSlot(inputEl, dropEl, imgEl, placeholderEl, slotEl, onChange){
     dropEl.addEventListener('click', function(){ inputEl.click(); });
-    inputEl.addEventListener('change', function(){ setPreview(imgEl, placeholderEl, slotEl, inputEl.files[0]); updateBtn(); });
+    inputEl.addEventListener('change', function(){ setPreview(imgEl, placeholderEl, slotEl, inputEl.files[0]); onChange(); });
     ['dragover','dragenter'].forEach(function(ev){
       dropEl.addEventListener(ev, function(e){ e.preventDefault(); dropEl.classList.add('drag'); });
     });
@@ -186,64 +334,59 @@
     });
     dropEl.addEventListener('drop', function(e){
       var f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if(f){ inputEl.files=e.dataTransfer.files; setPreview(imgEl, placeholderEl, slotEl, f); updateBtn(); }
+      if(f){ inputEl.files=e.dataTransfer.files; setPreview(imgEl, placeholderEl, slotEl, f); onChange(); }
     });
-    // 移除按钮
     var clearBtn=slotEl.querySelector('.clear');
     if(clearBtn){
       clearBtn.addEventListener('click', function(e){
         e.stopPropagation();
         inputEl.value='';
         setPreview(imgEl, placeholderEl, slotEl, null);
-        updateBtn();
+        onChange();
       });
     }
   }
 
-  function updateBtn(){
-    var hasUser=fileUser.files.length>0, hasChat=fileChat.files.length>0;
-    btn.disabled = !(hasUser || hasChat);
-  }
-
-  function showResult(resp){
-    // resp 为完整响应（含最外层 nickname_consistent）；内部字段在 resp.data
-    var d = resp && resp.data ? resp.data : (resp||{});
+  function setResultCards(prefix, d){
     function set(el,val){
       el.textContent = (val===null || val===undefined || val==='') ? '未识别到' : val;
       if(val===null || val===undefined || val==='') el.classList.add('null'); else el.classList.remove('null');
     }
+    d = d || {};
     var u=d.user||{};
-    set(document.getElementById('vNick'), u.nickname);
-    set(document.getElementById('vId'), u.douyin_id || u.xiaohongshu_id);
-    set(document.getElementById('vObj'), d.chat_object_name);
-    set(document.getElementById('vPhone'), d.phone);
-
-    // 昵称一致性校验：优先用 data.nickname_consistent，兜底用 data.nickname_check.consistent
-    var cb=document.getElementById('checkBanner'), ct=document.getElementById('checkText');
-    var consistent = (d.nickname_consistent !== undefined)
-        ? d.nickname_consistent
-        : ((d.nickname_check||{}).consistent);
-    var nc=(d.nickname_check)||{};
-    var un=nc.user||'', cn=nc.chat||'';
-    if(consistent===true){
-      cb.className='check on yes'; ct.textContent='昵称一致：主页『'+un+'』与对话框『'+cn+'』匹配';
-    }else if(consistent===false){
-      cb.className='check on no'; ct.textContent='昵称不一致：主页『'+un+'』 ≠ 对话框『'+cn+'』';
-    }else{
-      cb.className='check on unknown'; ct.textContent='无法判断昵称一致性（昵称未识别到）';
-    }
-
-    document.getElementById('rawJson').textContent=JSON.stringify(resp,null,2);
-    resultEl.classList.remove('hide');
+    set(document.getElementById(prefix+'Nick'), u.nickname);
+    set(document.getElementById(prefix+'Id'), u.douyin_id || u.xiaohongshu_id);
+    set(document.getElementById(prefix+'Obj'), d.chat_object_name);
+    set(document.getElementById(prefix+'Phone'), d.phone);
   }
 
-  function setAlert(msg){
-    if(msg){ alertEl.textContent=msg; alertEl.className='alert err'; }
-    else{ alertEl.textContent=''; alertEl.className='alert hide'; }
+  function renderCheckBanner(prefix, d){
+    var cb=document.getElementById(prefix+'CheckBanner'), ct=document.getElementById(prefix+'CheckText');
+    if(!cb) return;
+    d = d || {};
+    var consistent = (d.nickname_consistent !== undefined) ? d.nickname_consistent : ((d.nickname_check||{}).consistent);
+    var nc=d.nickname_check||{}; var un=nc.user||'', cn=nc.chat||'';
+    if(consistent===true){ cb.className='check on yes'; ct.textContent='昵称一致：主页『'+un+'』与对话框『'+cn+'』匹配'; }
+    else if(consistent===false){ cb.className='check on no'; ct.textContent='昵称不一致：主页『'+un+'』 ≠ 对话框『'+cn+'』'; }
+    else { cb.className='check on unknown'; ct.textContent='无法判断昵称一致性（昵称未识别到）'; }
   }
 
-  bindSlot(fileUser, dropUser, preUser, phUser, slotUser);
-  bindSlot(fileChat, dropChat, preChat, phChat, slotChat);
+  /* ===================== 同步识别 ===================== */
+  var fileUser=document.getElementById('fileUser'),
+      fileChat=document.getElementById('fileChat'),
+      btn=document.getElementById('btnRun'),
+      statusEl=document.getElementById('status'),
+      alertEl=document.getElementById('alert'),
+      resultEl=document.getElementById('result');
+
+  function updateSyncBtn(){
+    var hasUser=fileUser.files.length>0, hasChat=fileChat.files.length>0;
+    btn.disabled = !(hasUser || hasChat);
+  }
+  bindSlot(fileUser, document.getElementById('dropUser'), document.getElementById('preUser'),
+           document.getElementById('phUser'), document.getElementById('slotUser'), updateSyncBtn);
+  bindSlot(fileChat, document.getElementById('dropChat'), document.getElementById('preChat'),
+           document.getElementById('phChat'), document.getElementById('slotChat'), updateSyncBtn);
 
   btn.addEventListener('click', function(){
     var fd=new FormData();
@@ -252,19 +395,210 @@
     if(fileChat.files.length){ fd.append('chat', fileChat.files[0]); hasAny=true; }
     if(!hasAny) return;
 
-    setAlert(null);
+    alertEl.className='alert hide'; alertEl.textContent='';
     statusEl.classList.add('on');
     btn.disabled=true;
 
     fetch('/recognize',{method:'POST',body:fd})
       .then(function(r){ return r.json().catch(function(){ throw new Error('响应解析失败'); }); })
       .then(function(res){
-        if(res && res.code===0 && res.data){ showResult(res); }
-        else { setAlert((res&&res.message)||'识别失败'); resultEl.classList.add('hide'); }
+        if(res && res.code===0 && res.data){
+          setResultCards('v', res.data);
+          renderCheckBanner('', res.data);
+          document.getElementById('rawJson').textContent=JSON.stringify(res,null,2);
+          resultEl.classList.remove('hide');
+        }
+        else { alertEl.textContent=(res&&res.message)||'识别失败'; alertEl.className='alert err'; resultEl.classList.add('hide'); }
       })
-      .catch(function(e){ setAlert('请求失败：'+(e.message||'未知错误')); resultEl.classList.add('hide'); })
-      .finally(function(){ statusEl.classList.remove('on'); btn.disabled=false; updateBtn(); });
+      .catch(function(e){ alertEl.textContent='请求失败：'+(e.message||'未知错误'); alertEl.className='alert err'; resultEl.classList.add('hide'); })
+      .finally(function(){ statusEl.classList.remove('on'); btn.disabled=false; updateSyncBtn(); });
   });
+
+  /* ===================== 异步识别 ===================== */
+  var aFileUser=document.getElementById('aFileUser'),
+      aFileChat=document.getElementById('aFileChat'),
+      aBtn=document.getElementById('aBtn'),
+      aStatus=document.getElementById('aStatus'),
+      aAlert=document.getElementById('aAlert'),
+      aTaskBox=document.getElementById('aTaskBox'),
+      aTaskId=document.getElementById('aTaskId'),
+      aBadge=document.getElementById('aBadge'),
+      aTaskMeta=document.getElementById('aTaskMeta'),
+      aResult=document.getElementById('aResult');
+  var pollTimer=null;
+
+  function updateAsyncBtn(){
+    aBtn.disabled = !(aFileUser.files.length>0 || aFileChat.files.length>0);
+  }
+  bindSlot(aFileUser, document.getElementById('aDropUser'), document.getElementById('aPreUser'),
+           document.getElementById('aPhUser'), document.getElementById('aSlotUser'), updateAsyncBtn);
+  bindSlot(aFileChat, document.getElementById('aDropChat'), document.getElementById('aPreChat'),
+           document.getElementById('aPhChat'), document.getElementById('aSlotChat'), updateAsyncBtn);
+
+  function setBadge(status){
+    aBadge.className='badge '+status;
+    aBadge.textContent=status;
+  }
+
+  function aShowAlert(msg){
+    if(msg){ aAlert.textContent=msg; aAlert.className='alert err'; }
+    else{ aAlert.textContent=''; aAlert.className='alert hide'; }
+  }
+
+  function pollTask(tid){
+    function tick(){
+      fetch('/task/'+tid)
+        .then(function(r){ return r.json(); })
+        .then(function(t){
+          setBadge(t.status);
+          aTaskMeta.textContent='提交于 '+t.created_at+(t.finished_at?(' · 完成于 '+t.finished_at):'');
+          if(t.status==='done'){
+            aStatus.classList.remove('on');
+            aBtn.disabled=false;
+            var r = t.result || {};
+            setResultCards('a', r.data);
+            renderCheckBanner('a', r.data);
+            document.getElementById('aRawJson').textContent=JSON.stringify(t,null,2);
+            aResult.classList.remove('hide');
+            return;
+          }
+          if(t.status==='failed'){
+            aStatus.classList.remove('on');
+            aBtn.disabled=false;
+            aShowAlert('识别失败：'+(t.error||'未知错误'));
+            return;
+          }
+          // pending / processing → 继续轮询
+          aStatus.classList.add('on');
+          document.getElementById('aStatusText').textContent =
+            t.status==='processing' ? 'worker 识别中…' : '排队等待 worker…';
+          pollTimer=setTimeout(tick, 5000);
+        })
+        .catch(function(e){
+          aStatus.classList.remove('on');
+          aBtn.disabled=false;
+          aShowAlert('查询任务失败：'+(e.message||'未知错误'));
+        });
+    }
+    tick();
+  }
+
+  aBtn.addEventListener('click', function(){
+    var fd=new FormData();
+    var hasAny=false;
+    if(aFileUser.files.length){ fd.append('user', aFileUser.files[0]); hasAny=true; }
+    if(aFileChat.files.length){ fd.append('chat', aFileChat.files[0]); hasAny=true; }
+    if(!hasAny) return;
+
+    if(pollTimer){ clearTimeout(pollTimer); pollTimer=null; }
+    aShowAlert(null);
+    aResult.classList.add('hide');
+    aTaskBox.classList.remove('on');
+    aStatus.classList.add('on');
+    aBtn.disabled=true;
+    document.getElementById('aStatusText').textContent='提交中…';
+
+    fetch('/recognize/async',{method:'POST',body:fd})
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && res.code===0 && res.task_id){
+          aTaskId.textContent=res.task_id;
+          aTaskBox.classList.add('on');
+          pollTask(res.task_id);
+        } else {
+          aStatus.classList.remove('on');
+          aBtn.disabled=false;
+          aShowAlert((res&&res.message)||'提交异步任务失败（检查 MySQL/worker 是否启动）');
+        }
+      })
+      .catch(function(e){
+        aStatus.classList.remove('on');
+        aBtn.disabled=false;
+        aShowAlert('请求失败：'+(e.message||'未知错误'));
+      });
+  });
+
+  /* ===================== 任务记录（倒序分页查询） ===================== */
+  var dStart=document.getElementById('dStart'),
+      dEnd=document.getElementById('dEnd'),
+      dBtn=document.getElementById('dBtn'),
+      dRows=document.getElementById('dRows'),
+      dMeta=document.getElementById('dMeta'),
+      dPageInfo=document.getElementById('dPageInfo'),
+      dPrev=document.getElementById('dPrev'),
+      dNext=document.getElementById('dNext'),
+      dAlert=document.getElementById('dAlert'),
+      dDetailWrap=document.getElementById('dDetailWrap'),
+      dDetail=document.getElementById('dDetail');
+  var dPage=1, dPages=1;
+
+  function fmt(v){ return v ? String(v).replace('T',' ') : '—'; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+  function dShowAlert(msg){
+    if(msg){ dAlert.textContent=msg; dAlert.className='alert err'; }
+    else{ dAlert.textContent=''; dAlert.className='alert hide'; }
+  }
+
+  function loadData(){
+    dShowAlert(null);
+    var sp = dStart.value ? dStart.value.replace('T',' ') : '';
+    var ep = dEnd.value ? dEnd.value.replace('T',' ') : '';
+    var qs='?page='+dPage;
+    if(sp) qs+='&start='+encodeURIComponent(sp+':00');
+    if(ep) qs+='&end='+encodeURIComponent(ep+':59');
+    fetch('/admin/tasks'+qs)
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res.code!==0){ dShowAlert(res.message||'查询失败'); return; }
+        dPages=res.pages||1;
+        dMeta.textContent='共 '+res.total+' 条，第 '+res.page+' / '+dPages+' 页（每页 20 条）';
+        dPageInfo.textContent='第 '+res.page+' / '+dPages+' 页';
+        dPrev.disabled = res.page<=1;
+        dNext.disabled = res.page>=dPages;
+        if(!res.items.length){
+          dRows.innerHTML='<tr><td colspan="8" style="padding:18px;color:var(--muted);text-align:center">暂无数据</td></tr>';
+          dDetailWrap.style.display='none';
+          return;
+        }
+        function thumb(tid,n){
+          return '<a href="/task/'+tid+'/image/'+n+'" target="_blank" title="点击查看大图">'
+            +'<img loading="lazy" src="/task/'+tid+'/image/'+n+'" '
+            +'style="width:54px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--line);background:#f2f4f7"></a>';
+        }
+        dRows.innerHTML=res.items.map(function(it){
+          var st=esc(it.status);
+          return '<tr style="border-bottom:1px solid var(--line)">'
+            +'<td style="padding:9px 10px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(it.task_id.slice(0,12))+'…</td>'
+            +'<td style="padding:9px 10px">'+thumb(it.task_id,1)+'</td>'
+            +'<td style="padding:9px 10px">'+thumb(it.task_id,2)+'</td>'
+            +'<td style="padding:9px 10px"><span class="badge '+st+'">'+st+'</span></td>'
+            +'<td style="padding:9px 10px">'+esc(it.backend||'—')+'</td>'
+            +'<td style="padding:9px 10px">'+esc(fmt(it.created_at))+'</td>'
+            +'<td style="padding:9px 10px">'+esc(fmt(it.finished_at))+'</td>'
+            +'<td style="padding:9px 10px"><a href="javascript:void(0)" data-tid="'+esc(it.task_id)+'" style="color:var(--accent)">查看</a></td>'
+            +'</tr>';
+        }).join('');
+        // 绑定“查看”
+        dRows.querySelectorAll('a[data-tid]').forEach(function(a){
+          a.addEventListener('click', function(){
+            var tid=a.getAttribute('data-tid');
+            fetch('/task/'+tid).then(function(r){return r.json();}).then(function(t){
+              dDetail.textContent=JSON.stringify(t,null,2);
+              dDetailWrap.style.display='block';
+            });
+          });
+        });
+      })
+      .catch(function(e){ dShowAlert('请求失败：'+(e.message||'未知错误')); });
+  }
+
+  dBtn.addEventListener('click', function(){ dPage=1; loadData(); });
+  dPrev.addEventListener('click', function(){ if(dPage>1){ dPage--; loadData(); } });
+  dNext.addEventListener('click', function(){ if(dPage<dPages){ dPage++; loadData(); } });
+
+  // 切到“任务记录”页时自动加载第一页
+  document.querySelector('.menu-item[data-page="data"]').addEventListener('click', function(){ loadData(); });
 })();
 </script>
 </body>

@@ -128,6 +128,64 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 ---
 
+## 异步识别 / 多机部署（MySQL 持久化）
+
+单台机器跑同步识别用不上 MySQL；要做异步识别（先返回 taskId、后台识别再查询结果）和多机共享任务时，才需要 MySQL。
+
+拓扑：MySQL 只装在一台机器（下称机器 A，如 `10.237.179.21`），机器 A 和其它机器（B、C…）都同时跑 HTTP + worker，连同一个库。
+
+### 1. 安装 MySQL 5.7（仅机器 A）
+
+用随包的离线安装包（CentOS 7）：
+
+```bash
+tar -xzf mysql-offline-centos7.tar.gz
+cd mysql-offline
+sudo IMGSIEVE_DB_PASSWORD='业务库强密码' ./install.sh
+```
+
+脚本会自动装 RPM、启动 mysqld、建库 `imgsieve` 和用户 `imgsieve`。装完还需让别的机器能连：
+
+```bash
+# /etc/my.cnf 的 [mysqld] 段加一行，然后重启
+#   bind-address=0.0.0.0
+sudo systemctl restart mysqld
+
+# 放行机器 B 的内网 IP
+sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=机器B的IP port port=3306 protocol=tcp accept'
+sudo firewall-cmd --reload
+```
+
+> MySQL 5.7 默认密码策略：密码须大写 + 小写 + 数字 + 特殊符号、长度 ≥ 8。
+
+### 2. 创建 .env（每台机器都要，内容一致）
+
+在部署目录 `/opt/server/img-sieve/` 下新建 `.env`：
+
+```bash
+cd /opt/server/img-sieve
+cat > .env <<'EOF'
+# 机器 A（本机有 MySQL）用 127.0.0.1；机器 B/C 填机器 A 的内网 IP
+IMG_SIEVE_MYSQL_HOST=127.0.0.1
+IMG_SIEVE_MYSQL_PORT=3306
+IMG_SIEVE_MYSQL_USER=imgsieve
+IMG_SIEVE_MYSQL_PASSWORD=业务库强密码
+IMG_SIEVE_MYSQL_DB=imgsieve
+EOF
+```
+
+- 机器 A 填 `127.0.0.1`；机器 B/C 填机器 A 的内网 IP（如 `10.237.179.21`）。
+- 密码就是安装 MySQL 时 `IMGSIEVE_DB_PASSWORD` 设的那个，**所有机器必须一致**。
+- 配好后用 `./keepalive.sh start` 启动，它会自动同时拉起 HTTP 和 worker；不配 `IMG_SIEVE_MYSQL_HOST` 则只跑 HTTP、不跑 worker。
+
+```bash
+./keepalive.sh start
+./keepalive.sh status    # 能看到 服务/守护/worker 三个进程
+tail -f logs/worker.log  # 异步识别日志
+```
+
+---
+
 ## CentOS 7 环境适配说明（依赖版本锁定）
 
 目标部署机多为 CentOS 7 等老系统（GLIBC 2.17），只能使用 `manylinux_2_17` 的 wheel。为在该环境下稳定运行，以下依赖版本被**锁定**（锁定逻辑内置在 `build-linux-runtime.sh` 的自动下载里；`wheels_linux_x86_64/` 不入 git，联网按需下载）：

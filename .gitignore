@@ -30,11 +30,17 @@ web/_shots/
 *.log
 logs/
 
+# 本地 MySQL 配置（含密码，不提交；模板见 .env.example）
+.env
+
+# MySQL 离线包的 RPM（218M，下载产物；download.sh 可重新拉取）
+mysql-offline/rpms/
+
 #idea
 .idea/
 
 # WorkBuddy 本地工作数据（记忆、日志等，不应提交）
 .workbuddy/
 
-#deploy
-deploy/
+#deploy 思前想后还是放开了，这个是单独给特殊场景使用的将dist包内容上传ftp和ftp下载。
+#deploy/
