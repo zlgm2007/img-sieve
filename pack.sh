@@ -39,7 +39,7 @@ mkdir -p "$STAGE"
 
 # 1) 代码与脚本
 cp -R img_sieve "$STAGE/"
-cp cli.py server.py README.md install.sh run.sh stop.sh keepalive.sh "$STAGE/"
+cp cli.py server.py worker.py README.md install.sh run.sh stop.sh keepalive.sh .env.example "$STAGE/"
 # 1a) 网页界面
 if [ -d web ]; then
     cp -R web "$STAGE/"

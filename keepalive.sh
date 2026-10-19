@@ -10,6 +10,14 @@
 set -eo pipefail
 cd "$(dirname "$0")"
 
+# 加载 MySQL/异步配置（若存在）。.env 形如：
+#   IMG_SIEVE_MYSQL_HOST=10.237.179.21
+#   IMG_SIEVE_MYSQL_PORT=3306
+#   IMG_SIEVE_MYSQL_USER=imgsieve
+#   IMG_SIEVE_MYSQL_PASSWORD=xxxx
+#   IMG_SIEVE_MYSQL_DB=imgsieve
+[ -f .env ] && set -a && . ./.env && set +a
+
 # 项目标识横幅
 print_banner() {
     echo "[img-sieve] 工具: img-sieve —— 抖音 / 小红书截图信息提取服务"
@@ -86,6 +94,53 @@ supervisor_alive() {
     [ -f "$SUPER_PID_FILE" ] && kill -0 "$(cat "$SUPER_PID_FILE" 2>/dev/null)" 2>/dev/null
 }
 
+# ---------- 异步 worker ----------
+WORKER_PID_FILE="$LOG_DIR/worker.pid"
+
+# 是否配置了 MySQL（配了才需要跑 worker）
+mysql_configured() {
+    [ -n "${IMG_SIEVE_MYSQL_HOST:-}" ]
+}
+
+resolve_python() {
+    for PY in runtime/bin/python3 .venv/bin/python .venv_test/bin/python python3; do
+        if { [ -x "$PY" ] || command -v "$PY" >/dev/null 2>&1; } \
+           && "$PY" -c "import rapidocr_onnxruntime" 2>/dev/null; then
+            echo "$PY"; return 0
+        fi
+    done
+    return 1
+}
+
+worker_alive() {
+    [ -f "$WORKER_PID_FILE" ] && kill -0 "$(cat "$WORKER_PID_FILE" 2>/dev/null)" 2>/dev/null
+}
+
+start_worker() {
+    if ! mysql_configured; then return 0; fi   # 未配 MySQL 不跑 worker
+    if worker_alive; then return 0; fi
+    local PY
+    PY="$(resolve_python || true)"
+    if [ -z "$PY" ]; then
+        echo "[keepalive] $(date '+%F %T') 未找到可用 Python，worker 未启动。"
+        return 1
+    fi
+    nohup "$PY" worker.py >> "$LOG_DIR/worker.log" 2>&1 &
+    echo $! > "$WORKER_PID_FILE"
+    echo "[keepalive] $(date '+%F %T') worker 已启动（PID $!），日志 $LOG_DIR/worker.log"
+}
+
+stop_worker() {
+    if [ -f "$WORKER_PID_FILE" ]; then
+        local wpid
+        wpid="$(cat "$WORKER_PID_FILE" 2>/dev/null || true)"
+        [ -n "$wpid" ] && kill "$wpid" 2>/dev/null || true
+        rm -f "$WORKER_PID_FILE"
+    fi
+    # 兜底：按命令行精确找 worker.py 进程
+    pkill -f "worker.py" 2>/dev/null || true
+}
+
 start_server() {
     echo "[keepalive] $(date '+%F %T') 服务未运行，启动中（端口 ${PORT}）..."
     nohup ./run.sh --host 0.0.0.0 --port "$PORT" >> "$LOG_DIR/server.log" 2>&1 &
@@ -105,6 +160,9 @@ _supervise() {
     while true; do
         if ! is_listening "$PORT"; then
             start_server
+        fi
+        if mysql_configured && ! worker_alive; then
+            start_worker
         fi
         sleep 5
     done
@@ -142,7 +200,16 @@ case "$CMD" in
         else
             echo "[keepalive] 守护: 未运行（服务不会被自动拉起）"
         fi
-        echo "[keepalive] 日志: $LOG_DIR/server.log , $LOG_DIR/keepalive.log"
+        if mysql_configured; then
+            if worker_alive; then
+                echo "[keepalive] worker: 运行中  PID: $(cat "$WORKER_PID_FILE")"
+            else
+                echo "[keepalive] worker: 未运行（守护会自动拉起）"
+            fi
+        else
+            echo "[keepalive] worker: 未启用（未配置 IMG_SIEVE_MYSQL_HOST）"
+        fi
+        echo "[keepalive] 日志: $LOG_DIR/server.log , $LOG_DIR/keepalive.log , $LOG_DIR/worker.log"
         ;;
 
     stop)
@@ -154,6 +221,7 @@ case "$CMD" in
         else
             echo "[keepalive] 守护未在运行"
         fi
+        stop_worker
         ./stop.sh --port "$PORT"
         ;;
 

@@ -27,7 +27,10 @@
 | 方法     | 路径           | 说明                          |
 | ------ | ------------ | --------------------------- |
 | `GET`  | `/`          | 网页界面（上传两张图 + 展示识别结果）        |
-| `POST` | `/recognize` | 上传图片识别，返回结构化 JSON（**核心接口**） |
+| `POST` | `/recognize` | 上传图片识别，返回结构化 JSON（**核心接口**，同步阻塞） |
+| `POST` | `/recognize/async` | 异步识别：收图立即返回 `task_id`，后台识别（**多机部署用**） |
+| `GET`  | `/task/{task_id}` | 按 task_id 查询异步任务状态与识别结果 |
+| `POST` | `/admin/purge?days=N` | 清理 N 天前的历史任务与图片（运维） |
 | `GET`  | `/health`    | 健康检查                        |
 
 
@@ -323,3 +326,52 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 * 服务支持并发请求（`ThreadingHTTPServer` 每请求一线程）。
 
 * 启动时可用 `--backend` 强制指定 OCR 后端（`rapidocr|vision|tesseract|mock`），默认自动选择。
+
+***
+
+## 异步识别（多机部署）
+
+当部署为多台机器共享一个 MySQL 时，用异步接口：调用方上传后立即拿到 `task_id`，由任意一台机器的 worker 后台识别，再轮询查询结果。
+
+### POST /recognize/async
+
+入参与 `POST /recognize` 完全相同（multipart，上传 1~2 张图片）。
+
+**响应**（立即返回，不等待识别）：
+
+```json
+{ "code": 0, "message": "ok", "task_id": "f3a2...e91", "status": "pending" }
+```
+
+### GET /task/{task_id}
+
+轮询查询。`status` 取值：`pending`（排队中）→ `processing`（识别中）→ `done`（完成）/ `failed`（失败）。
+
+```json
+{
+  "code": 0,
+  "task_id": "f3a2...e91",
+  "status": "done",
+  "created_at": "2026-10-19 11:00:00",
+  "finished_at": "2026-10-19 11:00:05",
+  "backend": "rapidocr",
+  "result": { "code": 0, "message": "ok", "data": { "...": "同 /recognize 的 data" } },
+  "error": null
+}
+```
+
+建议轮询间隔 1~2 秒；单图识别约数秒（取决于服务器 CPU）。
+
+### POST /admin/purge?days=N
+
+清理 N 天以前的历史任务及其图片 BLOB，释放 MySQL 空间。返回删除条数：
+
+```json
+{ "code": 0, "message": "ok", "days": 5, "deleted": 128 }
+```
+
+可选保护：设置环境变量 `IMG_SIEVE_ADMIN_TOKEN` 后，调用需带 `?token=xxx`。建议用 crontab 定期执行（如每天凌晨清 7 天前）：
+
+```bash
+0 3 * * * curl -s -X POST 'http://127.0.0.1:8080/admin/purge?days=7'
+```

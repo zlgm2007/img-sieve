@@ -30,6 +30,12 @@ web/_shots/
 *.log
 logs/
 
+# 本地 MySQL 配置（含密码，不提交；模板见 .env.example）
+.env
+
+# MySQL 离线包的 RPM（218M，下载产物；download.sh 可重新拉取）
+mysql-offline/rpms/
+
 #idea
 .idea/
 
