@@ -331,36 +331,128 @@ boolean consistent = root.path("data").path("nickname_consistent").asBoolean();
 
 ## 异步识别（多机部署）
 
-当部署为多台机器共享一个 MySQL 时，用异步接口：调用方上传后立即拿到 `task_id`，由任意一台机器的 worker 后台识别，再轮询查询结果。
+当部署为多台机器共享一个 MySQL 时，用异步接口：调用方上传后立即拿到 `task_id`，由任意一台机器的 worker 后台识别，再轮询查询结果。同步接口 `/recognize` 也会把每次识别写进同一张任务表，两边数据在「任务记录」页都能查到。
 
 ### POST /recognize/async
 
-入参与 `POST /recognize` 完全相同（multipart，上传 1~2 张图片）。
+入参与 `POST /recognize` 完全相同（`multipart/form-data`，上传 1~2 张图片，字段名任意、可带 `role=`）。
 
 **响应**（立即返回，不等待识别）：
 
 ```json
-{ "code": 0, "message": "ok", "task_id": "f3a2...e91", "status": "pending" }
+{ "code": 0, "message": "ok", "task_id": "f3a2b1c4...", "status": "pending" }
+```
+
+**curl 示例：**
+
+```bash
+curl -X POST http://10.237.179.21:8080/recognize/async \
+  -F "user=@主页.png" \
+  -F "chat=@对话框.png"
+# => {"code":0,"message":"ok","task_id":"9c1f...","status":"pending"}
 ```
 
 ### GET /task/{task_id}
 
-轮询查询。`status` 取值：`pending`（排队中）→ `processing`（识别中）→ `done`（完成）/ `failed`（失败）。
+轮询查询任务状态与结果。
+
+**状态流转**：`pending`（排队中）→ `processing`（某台 worker 已认领、识别中）→ `done`（完成）/ `failed`（失败）。
+
+**响应：**
 
 ```json
 {
   "code": 0,
-  "task_id": "f3a2...e91",
+  "task_id": "9c1f...",
   "status": "done",
-  "created_at": "2026-10-19 11:00:00",
-  "finished_at": "2026-10-19 11:00:05",
+  "created_at": "2026-10-19 11:00:00.123456",
+  "started_at": "2026-10-19 11:00:01.200000",
+  "finished_at": "2026-10-19 11:00:05.800000",
   "backend": "rapidocr",
-  "result": { "code": 0, "message": "ok", "data": { "...": "同 /recognize 的 data" } },
+  "result": { "code": 0, "message": "ok", "data": { "...": "同 /recognize 的 data 结构" } },
   "error": null
 }
 ```
 
-建议轮询间隔 1~2 秒；单图识别约数秒（取决于服务器 CPU）。
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | int | `0` 成功；`404` 任务不存在；`500` MySQL 连接失败 |
+| `task_id` | string | 任务 ID |
+| `status` | string | `pending` / `processing` / `done` / `failed` |
+| `created_at` | string | 提交时间 |
+| `started_at` | string\|null | worker 开始识别时间 |
+| `finished_at` | string\|null | 识别完成时间 |
+| `backend` | string\|null | 实际 OCR 后端 |
+| `result` | object\|null | 识别结果，结构同 `/recognize` 的返回（含 `data`）；未完成时为 `null` |
+| `error` | string\|null | 失败原因；成功时为 `null` |
+
+建议轮询间隔 **1~2 秒**；识别完成（`status=done`）后停止轮询。单图识别约数秒（取决于服务器 CPU）。
+
+### Java 异步调用示例（提交 + 轮询）
+
+用 `RestTemplate` 提交 multipart 拿到 `taskId`，再循环 `GET /task/{id}` 直到 `done`/`failed`。
+
+```java
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.*;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
+
+import java.io.IOException;
+
+public class ImgSieveAsyncClient {
+
+    private static final String BASE = "http://10.237.179.21:8080";
+    private final RestTemplate rest = new RestTemplate();
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    /** 1) 提交异步识别，返回 taskId */
+    public String submitAsync(byte[] homeImg, String homeName,
+                              byte[] chatImg, String chatName) throws IOException {
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("user", new ByteArrayResource(homeImg) {
+            @Override public String getFilename() { return homeName; }
+        });
+        body.add("chat", new ByteArrayResource(chatImg) {
+            @Override public String getFilename() { return chatName; }
+        });
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        HttpEntity<MultiValueMap<String, Object>> req = new HttpEntity<>(body, headers);
+
+        ResponseEntity<String> resp =
+                rest.postForEntity(BASE + "/recognize/async", req, String.class);
+        return mapper.readTree(resp.getBody()).path("task_id").asText();
+    }
+
+    /** 2) 轮询直到完成，返回结果 JSON（最多等 60 秒） */
+    public JsonNode waitResult(String taskId) throws Exception {
+        long deadline = System.currentTimeMillis() + 60_000;
+        while (System.currentTimeMillis() < deadline) {
+            String body = rest.getForObject(BASE + "/task/" + taskId, String.class);
+            JsonNode node = mapper.readTree(body);
+            String status = node.path("status").asText();
+            if ("done".equals(status))   return node.path("result");
+            if ("failed".equals(status)) throw new RuntimeException("识别失败: " + node.path("error").asText());
+            Thread.sleep(1500); // pending / processing，继续等
+        }
+        throw new RuntimeException("识别超时: " + taskId);
+    }
+
+    // 用法：
+    //   String taskId = client.submitAsync(homeBytes, "home.png", chatBytes, "chat.png");
+    //   JsonNode result = client.waitResult(taskId);
+    //   String nickname = result.path("data").path("user").path("nickname").asText();
+}
+```
+
+> 若图片在 Spring 里是 `MultipartFile`，用 `multipartFile.getBytes()` 取字节即可（同同步示例）。
 
 ### POST /admin/purge?days=N
 
