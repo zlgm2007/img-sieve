@@ -79,6 +79,8 @@ echo "[pack] 大小: $(du -h "$TARBALL" | cut -f1)"
 # 5) MySQL 5.7 离线包（仅当本地有 rpms/ 时才打；rpms 不进 git，见 .gitignore）
 if [ -d mysql-offline/rpms ] && compgen -G "mysql-offline/rpms/*.rpm" >/dev/null 2>&1; then
     MYSQL_TARBALL="$OUT_DIR/mysql-offline-centos7.tar.gz"
+    # 确保脚本带可执行位，避免在 CentOS 上解压后 ./install.sh 报 Permission denied
+    chmod +x mysql-offline/*.sh
     COPYFILE_DISABLE=1 tar --no-xattrs --no-fflags -czf "$MYSQL_TARBALL" mysql-offline
     echo "[pack] MySQL 离线包: $MYSQL_TARBALL ($(du -h "$MYSQL_TARBALL" | cut -f1))"
 else

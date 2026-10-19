@@ -45,33 +45,41 @@ DBUSER="${IMG_SIEVE_MYSQL_USER:-imgsieve}"
 DBPASS="${IMGSIEVE_DB_PASSWORD:-}"
 FROMHOST="${IMGSIEVE_FROMHOST:-%}"
 
-echo "[mysql-install] 5/5 建库建用户 ..."
+echo "[mysql-install] 5/5 改 root 临时密码 + 建库建用户 ..."
 if [ -z "$DBPASS" ]; then
     echo "[mysql-install] 未传 IMGSIEVE_DB_PASSWORD，跳过自动建库。"
-    echo "[mysql-install] 请用上面的临时密码登录后手工执行："
+    echo "[mysql-install] 请用临时密码登录后手工执行（首次登录会要求先改 root 密码）："
     echo
     echo "    mysql -uroot -p'$TMPPW' --connect-expired-password"
     echo "  然后执行："
     cat <<SQL
+ALTER USER 'root'@'localhost' IDENTIFIED BY '改成你自己的root密码';
 CREATE DATABASE $DB CHARACTER SET utf8mb4;
 CREATE USER '$DBUSER'@'$FROMHOST' IDENTIFIED BY '改成强密码';
 GRANT ALL ON $DB.* TO '$DBUSER'@'$FROMHOST';
 FLUSH PRIVILEGES;
 SQL
     echo
-    echo "[mysql-install] 提示：首次用临时密码登录会被要求改 root 密码，按提示改即可。"
     exit 0
 fi
 
-# 用临时密码连库建业务库/用户（不自动改 root 密码，避免触发密码复杂度策略失败）
-mysql -uroot -p"$TMPPW" --connect-expired-password <<SQL
+# MySQL 5.7 临时密码处于"过期"状态，必须先 ALTER 改密，才能执行其它 SQL。
+# 生成一个满足默认策略的 root 新密码（>=8位、大小写+数字+特殊字符）。
+ROOTPW="ImgRoot@$(openssl rand -hex 4)"
+mysql -uroot -p"$TMPPW" --connect-expired-password \
+    -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$ROOTPW';"
+
+# 用新 root 密码建业务库/用户
+mysql -uroot -p"$ROOTPW" <<SQL
 CREATE DATABASE IF NOT EXISTS $DB CHARACTER SET utf8mb4;
 CREATE USER IF NOT EXISTS '$DBUSER'@'$FROMHOST' IDENTIFIED BY '$DBPASS';
 GRANT ALL ON $DB.* TO '$DBUSER'@'$FROMHOST';
 FLUSH PRIVILEGES;
 SQL
 
-echo "[mysql-install] 完成。业务库=$DB  用户=$DBUSER  允许来源=$FROMHOST"
+echo "[mysql-install] 完成。"
+echo "    业务库=$DB  用户=$DBUSER  允许来源=$FROMHOST"
+echo "    root 新密码（请妥善保存）: $ROOTPW"
 echo "[mysql-install] 下一步（让机器 B 能连本机 MySQL）："
 echo "    1) 编辑 /etc/my.cnf，在 [mysqld] 段加： bind-address=0.0.0.0"
 echo "       然后 sudo systemctl restart mysqld"
