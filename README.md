@@ -265,6 +265,9 @@ crontab -e
   导致 `-coloredlogs` 之类的前导 `-` 目录名、甚至文件内容字节错位。
 - **构建**：`build-linux-runtime.sh` 在 `wheels_linux_x86_64/` 缺失/为空时会联网自动下载，并完成上述  
   版本锁定与 headless 切换；纯内网机器可先在联网机器上执行 `pip download` 填充该目录，再拷进内网离线构建。
+- **构建缓存**：CPython 基础包缓存在 `cache/`（带 gzip 完整性校验），二次构建检测到本地完好即跳过联网解析与下载；  
+  wheel 缓存在 `wheels_linux_x86_64/`。两个目录均不入 git。需要强制拉取最新 CPython 时执行  
+  `./build-linux-runtime.sh --refresh`（或 `PYBS_FORCE_REFRESH=1 ./build-linux-runtime.sh`）。
 
 ---
 
