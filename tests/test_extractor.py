@@ -23,6 +23,15 @@ WX_CHAT_IMG = os.path.join(BASE, "raw", "wx20261022094522060.jpg")
 ORDER_IMG = os.path.join(BASE, "raw", "order20261022094541207.jpg")
 
 
+def _order_obs(text, y1=100, x1=0):
+    """构造一条订单截图 OCR 观察（测试用）。"""
+    return {
+        "text": text,
+        "confidence": 0.9,
+        "box": {"x1": x1, "y1": y1, "x2": x1 + 240, "y2": y1 + 20},
+    }
+
+
 class TestExtractor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -149,6 +158,54 @@ class TestOrderExtractor(unittest.TestCase):
         # 商品编码 / 水印 / 日期不得混入订单号列表
         self.assertNotIn("DA1329440", data["order_ids"])
         self.assertNotIn("12449819689", data["order_ids"])
+
+    def test_oms_ticket_excludes_other_labels(self):
+        obs = [
+            _order_obs("订单编号：MM00061870", y1=311),
+            _order_obs("单号：DA1153620", y1=385),
+            _order_obs("OMS单号：210100025074430605", y1=406),
+        ]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074430605"])
+
+    def test_qms_is_oms_ocr_typo(self):
+        # 横版票据上 OCR 偶发把 O 识为 Q，规则兼容 QMS 前缀
+        obs = [_order_obs("QMS单号：210100025074410605")]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074410605"])
+
+    def test_detail_order_number_excludes_row_id(self):
+        obs = [
+            _order_obs("订单行号：2101000250744306050", y1=392),
+            _order_obs("订单编号：210100025074420605", y1=799),
+        ]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074420605"])
+
+    def test_oms_split_label_and_code(self):
+        obs = [
+            _order_obs("OMS单号：", y1=100, x1=46),
+            _order_obs("210100025074430605", y1=100, x1=180),
+        ]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074430605"])
+
+    def test_detail_split_label_and_code(self):
+        obs = [
+            _order_obs("订单编号：", y1=200, x1=30),
+            _order_obs("210100025074420605", y1=200, x1=180),
+        ]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074420605"])
+
+    def test_order_list_one_complete_one_split(self):
+        obs = [
+            _order_obs("订单号：210100025074400605", y1=100),
+            _order_obs("订单号：", y1=200, x1=30),
+            _order_obs("210100025074420605", y1=200, x1=180),
+        ]
+        self.assertEqual(extract_order_ids(obs),
+                         ["210100025074400605", "210100025074420605"])
 
 
 if __name__ == "__main__":

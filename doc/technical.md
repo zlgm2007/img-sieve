@@ -16,9 +16,11 @@ img-sieve/
 │   └── worker.py               # 异步 worker：轮询认领 pending 任务，按 scene 分流识别后写回
 ├── cli.py / server.py          # 本地 CLI（--mode people|order）/ HTTP 服务（纯 Python 标准库，ThreadingHTTPServer）
 ├── web/ui.html                 # 人脉识别网页（GET /：主页/联系人 + 对话框两张图，展示识别结果与任务记录）
-├── web/order.html              # 订单识别网页（GET /order：单张订单列表页，展示订单号列表）
+├── web/order.html              # 订单识别网页（GET /order：单张订单截图，展示订单号列表）
+├── web/stats.html              # 统计网页（GET /stats：近 7 天人脉 / 订单按日堆叠柱状图）
 ├── fixtures/sample_ocr.json    # 权威 OCR 夹具（mock 测试用）
 ├── tests/test_extractor.py     # 单元测试（抖音 / 小红书 / 微信 / 订单号）
+├── tests/test_service.py       # 服务层测试（订单方向兜底、出参复用）
 ├── tessdata/                   # tesseract 备用中文语言包（可选）
 ├── wheels_linux_x86_64/        # Linux x86_64 wheel（Python 3.11，离线安装用）
 ├── pack.sh                     # 开发机打包 → dist/*.tar.gz（自动包含 runtime/）
@@ -42,7 +44,7 @@ img-sieve/
 后端自动选择：rapidocr 可用 → 用它；否则 vision/tesseract/mock。可用 `--backend` 强制指定。
 
 **为什么选 RapidOCR**：模型（ONNX）内置在 wheel 里，离线安装后运行时零联网、零下载；
-中文 UI / 图上文字识别质量远高于 tesseract。**抖音、小红书、微信与订单列表共用一套 OCR**，按文本内容自动区分平台与业务线，无需分模型。
+中文 UI / 图上文字识别质量远高于 tesseract。**抖音、小红书、微信与订单截图共用一套 OCR**，按文本内容自动区分平台与业务线，无需分模型。
 
 **性能调优（可选，默认不改行为）**：识别是 CPU 密集型，单次耗时主要取决于服务器算力。可在启动前用环境变量微调（不设则保持默认）：
 
@@ -62,10 +64,15 @@ img-sieve/
 - **昵称一致性**：主页昵称与对话框对象昵称做**前 5 位前缀匹配**（`nickname_check.consistent`），较短方是较长方前缀即视为一致，容忍昵称过长在某侧被截断；任一侧缺失返回 `null`。
 - **角色识别**：含账号声明（抖音号 / 小红书号 / 微信号）或地区行 → `user`；含 11 位手机号 → `chat`；都不命中但顶部存在居中标题候选 → `chat`（覆盖微信对话框消息体不带手机号的情况）；`--role` 可人工覆盖。
 
-### 订单识别（订单列表页，单图）
+### 订单识别（单图，三类截图复用同一出参）
 
-- **订单号锚定**：仅匹配 `订单号[:：]<10 位以上数字>` 前缀行；商品编码、SKU、水印昵称、日期等不带前缀的数字串不会混入。
-- **提取顺序**：先逐条观察匹配；未命中再按行合并兜底（标签与数字被 OCR 拆成两条观察的情况）；结果按页面 `y1` 从上到下排序、去重保序；多张图（预留）跨图合并去重。
+- **标签锚定**：
+  - 订单列表页：`订单号[:：]<10~18 位数字>`，一张图可识别多个；
+  - 手工票据：`OMS单号[:：]<10~18 位数字>`；OCR 偶发把 `O` 误识为 `Q`，正则兼容 `QMS单号：`；
+  - 订单详情页：`订单编号[:：]<10~18 位数字>`，通常 1 个，仍返回数组。
+- **排除项**：票据上的 `单号：DA...`、`订单编号：MM...`，详情页的 `订单行号：...`，以及商品编码、SKU、水印昵称、日期等不带目标标签的数字串不会混入。
+- **提取顺序**：先逐条观察匹配；未形成完整观察的行再按同行 `x1` 坐标合并兜底（标签与数字被 OCR 拆成两条观察的情况）；已识别单号由 `seen` 去重，同一标签在不同行拆行也能继续兜底；结果按页面 `y1` 从上到下排序、去重保序；多张图（预留）跨图合并去重。
+- **方向兜底**：手工票据可能横放或倒置；`recognize_order` 首遍未抽到单号时，仅对单张图依次尝试 90° / 180° / 270° 旋转后重试，失败则保留首遍空结果，不改变响应结构。
 - **响应结构**：`{ "order_count": N, "order_ids": [...] }`；未识别到时 `order_count=0`、`order_ids=[]`。
 
 ### 两条业务线为何分开
@@ -79,7 +86,8 @@ img-sieve/
 - worker 认领任务后按 `task.scene` 分流：`order` → `recognize_order`，其余 → `recognize`；完成日志标注场景名。
 - `/task/{id}` 响应体带 `scene`；`/admin/tasks` 列表同时返回 `scene` 与两张图片文件名（订单任务 `image2_name` 为 `null`，前端据此条件渲染第二张缩略图）。
 - 队列机制沿用原设计：原子 `UPDATE ... WHERE status='pending'` 认领防重复、300 秒卡死回收、图片 LONGBLOB 入库、`/admin/purge` 按天清理。
-- MySQL 连接参数全部走环境变量，缺省 `host=127.0.0.1`、`port=3306`、`user=root`、`password=`、`db=imgsieve`。部署时把参数写入项目根目录 `.env`：`IMG_SIEVE_MYSQL_HOST / PORT / USER / PASSWORD / DB`；`run.sh`、`keepalive.sh` 启动时 `set -a; . ./.env; set +a` 加载，`img_sieve/db.py` 另有零依赖兜底解析（已存在的系统环境变量优先，`.env` 只补缺省），保证裸跑 `python server.py` / `worker.py` 也能读到配置。`IMG_SIEVE_ADMIN_TOKEN` 仅用于 `/admin/purge` 鉴权，`/admin/tasks` 不校验。
+- MySQL 连接参数全部走环境变量，缺省 `host=127.0.0.1`、`port=3306`、`user=root`、`password=`、`db=imgsieve`。`install.sh` 交互式询问主机、端口、账号、库名与密码（后四项可回车沿用当前值或默认值）后写入项目根目录 `.env`，也可手动编辑 `IMG_SIEVE_MYSQL_HOST / PORT / USER / PASSWORD / DB`；`run.sh`、`keepalive.sh` 启动时 `set -a; . ./.env; set +a` 加载，`img_sieve/db.py` 另有零依赖兜底解析（已存在的系统环境变量优先，`.env` 只补缺省），保证裸跑 `python server.py` / `worker.py` 也能读到配置。`IMG_SIEVE_ADMIN_TOKEN` 仅用于 `/admin/purge` 鉴权，`/admin/tasks`、`/admin/stats` 不校验。
+- 统计接口 `GET /admin/stats?days=7` 由 `db.stats_by_day()` 按 `DATE(created_at)` 与 `scene` 分组，后端补齐缺失日期与场景零值；人脉 `#0e9f8a`、订单 `#f59e0b`，`/stats` 页面渲染为堆叠柱状图。统计口径为区间内全部任务记录，不区分同步 / 异步与成功失败。
 
 ## Python 版本要求
 
@@ -129,7 +137,8 @@ pip download --dest wheels_linux_arm64 \
 
 - `TestExtractor`：抖音 / 小红书主页字段、手机号、对话框标题、角色判定、昵称一致性。
 - `TestWechatExtractor`：微信联系人字段（昵称 / 微信号 / 地区）、标题尾部误识字符清洗、角色判定、双图昵称一致且 `phone=null`。
-- `TestOrderExtractor`：订单号按页面顺序抽取、`order_count` 计数、商品编码 / SKU / 水印不混入。
+- `TestOrderExtractor`：列表页多号按页面顺序抽取；`OMS单号` / `QMS单号` / `订单编号` 标签识别；排除 `单号：DA...`、`订单编号：MM...`、`订单行号：...`、商品编码 / SKU / 水印；标签与编号拆行时按行合并兜底。
+- `TestOrderService`：首遍未抽到单号时触发旋转重试；首遍已有单号时不重复 OCR；复用 `order_count` / `order_ids` 出参结构。
 
-**测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）；接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /health`。
+**测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）、`http://10.237.179.21:8080/stats`（统计网页）；接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`。
 

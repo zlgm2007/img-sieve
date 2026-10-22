@@ -6,7 +6,7 @@
     python3 cli.py <user_img> <chat_img> [--backend rapidocr|vision|tesseract|mock]
     python3 cli.py <img> [--role user|chat] ...  (多张图 + 角色标记)
 
-    # 订单识别：单张订单列表页
+    # 订单识别：单张订单截图（列表页 / 票据 / 详情页）
     python3 cli.py --mode order <order_img> [--backend rapidocr|vision|tesseract|mock]
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ def main(argv=None):
     parser.add_argument("--backend", choices=["rapidocr", "vision", "tesseract", "mock"],
                         default=None, help="OCR 后端，默认自动选择")
     parser.add_argument("--mode", choices=["people", "order"], default="people",
-                        help="people=人脉识别（默认）；order=订单号列表识别")
+                        help="people=人脉识别（默认）；order=订单截图识别")
     parser.add_argument("--role", action="append", default=[],
                         help="人脉识别：图片角色 user|chat，格式 <图片路径>=user，可多次")
     args = parser.parse_args(argv)
@@ -30,7 +30,7 @@ def main(argv=None):
 
     if args.mode == "order":
         if len(args.images) != 1:
-            parser.error("订单模式仅支持 1 张订单列表页截图")
+            parser.error("订单模式仅支持 1 张订单截图")
         print(recognize_order_json(args.images, backend=args.backend))
         return 0
 

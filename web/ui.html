@@ -123,6 +123,45 @@
   .badge.processing{background:#fef3e2;color:#b45309}
   .badge.done{background:#e6f6f2;color:#0b7a68}
   .badge.failed{background:#fdecec;color:#a22}
+
+  /* ===== 任务记录结果弹窗 ===== */
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;
+    justify-content:center;padding:20px;z-index:60}
+  .modal-mask.hide{display:none}
+  .modal-panel{width:min(760px,100%);max-height:84vh;background:var(--card);border-radius:16px;
+    box-shadow:0 20px 60px rgba(15,23,42,.25);overflow:auto}
+  .modal-head{position:sticky;top:0;background:var(--card);display:flex;gap:12px;justify-content:space-between;
+    align-items:flex-start;padding:18px 20px 12px;border-bottom:1px solid var(--line)}
+  .modal-title{font-size:17px;font-weight:700}
+  .modal-meta{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px;color:var(--muted);font-size:12px}
+  .modal-meta b{color:var(--ink);font-family:ui-monospace,Menlo,monospace;font-weight:600;word-break:break-all}
+  .modal-close{width:32px;height:32px;border:none;border-radius:10px;background:#f1f5f9;color:var(--ink);
+    font-size:20px;line-height:1;cursor:pointer;flex:none}
+  .modal-body{padding:16px 20px}
+  .modal-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}
+  .modal-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fafbfc}
+  .modal-card .k{color:var(--muted);font-size:12px;margin-bottom:4px}
+  .modal-card .v{font-size:15px;font-weight:600;word-break:break-all}
+  .modal-card .v.null{color:var(--muted);font-weight:400;font-size:13px}
+  .modal-check{margin:0 0 12px}
+  .order-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .order-item{display:flex;justify-content:space-between;gap:12px;border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;background:#fafbfc}
+  .order-item .num{font-family:ui-monospace,Menlo,monospace;font-weight:600;word-break:break-all}
+  .modal-empty{color:var(--muted);padding:18px;text-align:center}
+  .modal-error{margin-top:12px;padding:12px 14px;border-radius:10px;background:#fdecec;color:#a22;border:1px solid #f3c6c6}
+  .modal-foot{padding:0 20px 18px}
+  .modal-raw-toggle{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;
+    padding:7px 14px;font-size:12px;cursor:pointer;font-family:inherit}
+  .modal-raw{background:#0f172a;color:#d7e0ea;padding:14px;border-radius:10px;overflow:auto;margin:10px 0 0;
+    font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all}
+  .modal-thumb{display:flex;gap:10px;margin:4px 0 12px}
+  .modal-thumb img{width:72px;height:96px;object-fit:cover;border:1px solid var(--line);border-radius:8px;background:#f2f4f7}
+  @media(max-width:700px){
+    .modal-body{padding:14px}
+    .modal-head{padding:14px 14px 10px}
+    .modal-foot{padding:0 14px 14px}
+  }
 </style>
 </head>
 <body>
@@ -139,9 +178,23 @@
       <button class="menu-item menu-child" data-page="async" type="button">异步识别</button>
     </div>
 
-    <a class="menu-item menu-parent" href="/order">订单识别</a>
+    <div class="menu-parent" id="groupOrder" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">订单识别</span>
+    </div>
+    <div class="menu-children" id="childrenOrder">
+      <a class="menu-item menu-child" href="/order?tab=sync">同步识别</a>
+      <a class="menu-item menu-child" href="/order?tab=async">异步识别</a>
+    </div>
 
-    <button class="menu-item menu-parent" data-page="data" type="button">任务记录</button>
+    <div class="menu-parent" id="groupRecord" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">任务记录</span>
+    </div>
+    <div class="menu-children" id="childrenRecord">
+      <button class="menu-item menu-child" data-page="data" type="button">任务记录</button>
+      <a class="menu-item menu-child" href="/stats">统计</a>
+    </div>
   </aside>
   <main class="main">
   <div class="wrap">
@@ -315,8 +368,22 @@
         </div>
       </section>
       <div class="alert" id="dAlert"></div>
-      <div class="raw" id="dDetailWrap" style="display:none">
-        <pre id="dDetail"></pre>
+    </div>
+
+    <div class="modal-mask hide" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title" id="detailModalTitle">识别结果</div>
+            <div class="modal-meta" id="detailModalMeta"></div>
+          </div>
+          <button class="modal-close" id="detailModalClose" type="button" aria-label="关闭弹窗">×</button>
+        </div>
+        <div class="modal-body" id="detailModalBody"></div>
+        <div class="modal-foot">
+          <button class="modal-raw-toggle" id="detailModalRawToggle" type="button">展开原始 JSON</button>
+          <pre class="modal-raw hide" id="detailModalRaw"></pre>
+        </div>
       </div>
     </div>
 
@@ -335,7 +402,11 @@
              data:document.getElementById('page-data')};
   var groupPeople=document.getElementById('groupPeople'),
       childrenPeople=document.getElementById('childrenPeople'),
-      dataBtn=document.querySelector('.menu-parent[data-page="data"]');
+      groupOrder=document.getElementById('groupOrder'),
+      childrenOrder=document.getElementById('childrenOrder'),
+      groupRecord=document.getElementById('groupRecord'),
+      childrenRecord=document.getElementById('childrenRecord'),
+      dataBtn=document.querySelector('.menu-child[data-page="data"]');
 
   function activate(page){
     Object.keys(pages).forEach(function(k){ pages[k].classList.toggle('hide', k!==page); });
@@ -343,22 +414,31 @@
       b.classList.toggle('active', b.dataset.page===page);
     });
     groupPeople.classList.toggle('active', page==='sync' || page==='async');
+    groupRecord.classList.toggle('active', page==='data');
     dataBtn.classList.toggle('active', page==='data');
   }
 
   document.querySelectorAll('.menu-child[data-page]').forEach(function(btn){
     btn.addEventListener('click', function(){ activate(btn.dataset.page); });
   });
-  dataBtn.addEventListener('click', function(){ activate('data'); });
 
   /* 一级分组：点击折叠 / 展开子菜单 */
   groupPeople.addEventListener('click', function(){
     childrenPeople.classList.toggle('collapsed');
     groupPeople.classList.toggle('collapsed');
   });
+  groupOrder.addEventListener('click', function(){
+    childrenOrder.classList.toggle('collapsed');
+    groupOrder.classList.toggle('collapsed');
+  });
+  groupRecord.addEventListener('click', function(){
+    childrenRecord.classList.toggle('collapsed');
+    groupRecord.classList.toggle('collapsed');
+  });
 
-  /* 支持 ?tab=data 直达任务记录 */
-  var initPage = /[?&]tab=data/.test(location.search) ? 'data' : 'sync';
+  /* 支持 ?tab=async 直达异步识别，?tab=data 直达任务记录 */
+  var initPage = /[?&]tab=data/.test(location.search) ? 'data'
+    : /[?&]tab=async/.test(location.search) ? 'async' : 'sync';
   activate(initPage);
 
   /* ---------- 通用上传槽绑定 ---------- */
@@ -576,8 +656,13 @@
       dPrev=document.getElementById('dPrev'),
       dNext=document.getElementById('dNext'),
       dAlert=document.getElementById('dAlert'),
-      dDetailWrap=document.getElementById('dDetailWrap'),
-      dDetail=document.getElementById('dDetail');
+      detailModal=document.getElementById('detailModal'),
+      detailModalTitle=document.getElementById('detailModalTitle'),
+      detailModalMeta=document.getElementById('detailModalMeta'),
+      detailModalBody=document.getElementById('detailModalBody'),
+      detailModalClose=document.getElementById('detailModalClose'),
+      detailModalRaw=document.getElementById('detailModalRaw'),
+      detailModalRawToggle=document.getElementById('detailModalRawToggle');
   var dPage=1, dPages=1;
 
   function fmt(v){ return v ? String(v).replace('T',' ') : '—'; }
@@ -587,6 +672,140 @@
     if(msg){ dAlert.textContent=msg; dAlert.className='alert err'; }
     else{ dAlert.textContent=''; dAlert.className='alert hide'; }
   }
+
+  function detailCard(k,v){
+    var empty=v===null || v===undefined || v==='';
+    return '<div class="modal-card"><div class="k">'+esc(k)+'</div>'
+      +'<div class="v'+(empty?' null':'')+'">'+(empty?'未识别到':esc(v))+'</div></div>';
+  }
+
+  function detailBanner(d){
+    var consistent=(d.nickname_consistent!==undefined)
+      ? d.nickname_consistent : ((d.nickname_check||{}).consistent);
+    var nc=d.nickname_check||{};
+    var un=nc.user||'', cn=nc.chat||'';
+    var cls, text;
+    if(consistent===true){
+      cls='check on yes';
+      text='昵称一致：主页『'+un+'』与对话框『'+cn+'』匹配';
+    } else if(consistent===false){
+      cls='check on no';
+      text='昵称不一致：主页『'+un+'』 ≠ 对话框『'+cn+'』';
+    } else {
+      cls='check on unknown';
+      text='无法判断昵称一致性（昵称未识别到）';
+    }
+    return '<div class="'+cls+' modal-check"><span class="dot"></span><span>'+esc(text)+'</span></div>';
+  }
+
+  function detailThumbs(it){
+    if(!it || !it.image1_name) return '';
+    var html='<div class="modal-thumb">'
+      +'<a href="/task/'+it.task_id+'/image/1" target="_blank" title="查看大图">'
+      +'<img loading="lazy" src="/task/'+it.task_id+'/image/1" alt="截图 1"></a>';
+    if(it.image2_name){
+      html+='<a href="/task/'+it.task_id+'/image/2" target="_blank" title="查看大图">'
+        +'<img loading="lazy" src="/task/'+it.task_id+'/image/2" alt="截图 2"></a>';
+    }
+    return html+'</div>';
+  }
+
+  function renderDetailMeta(it,t){
+    var scene=(t.scene||it.scene||'people')==='order'?'order':'people';
+    var status=t.status||it.status||'pending';
+    var backend=t.backend||it.backend||'—';
+    detailModalTitle.textContent=scene==='order'?'订单识别结果':'人脉识别结果';
+    detailModalMeta.innerHTML=''
+      +'<span><span class="badge '+(scene==='order'?'pending':'done')+'">'+(scene==='order'?'订单':'人脉')+'</span></span>'
+      +'<span><span class="badge '+esc(status)+'">'+esc(status)+'</span></span>'
+      +'<span>后端：<b>'+esc(backend||'—')+'</b></span>'
+      +'<span>任务：<b>'+esc(it.task_id)+'</b></span>'
+      +'<span>创建：<b>'+esc(fmt(it.created_at||t.created_at))+'</b></span>'
+      +'<span>完成：<b>'+esc(fmt(it.finished_at||t.finished_at))+'</b></span>';
+  }
+
+  function renderDetailTask(it,t){
+    renderDetailMeta(it,t);
+    var status=t.status||it.status||'pending';
+    var scene=(t.scene||it.scene||'people')==='order'?'order':'people';
+    detailModalRaw.textContent=JSON.stringify(t,null,2);
+    detailModalRaw.classList.add('hide');
+    detailModalRawToggle.textContent='展开原始 JSON';
+
+    if(status==='failed'){
+      detailModalBody.innerHTML='<div class="modal-error">识别失败：'+esc(t.error||'未知错误')+'</div>';
+      return;
+    }
+    if(status!=='done'){
+      detailModalBody.innerHTML='<div class="modal-empty">任务尚未完成，当前状态：'+esc(status)+'</div>';
+      return;
+    }
+
+    var data=(t.result&&t.result.data)||{};
+    if(scene==='order'){
+      var ids=Array.isArray(data.order_ids)?data.order_ids:[];
+      var count=Number.isFinite(data.order_count)?data.order_count:ids.length;
+      detailModalBody.innerHTML=detailThumbs(it)
+        +'<div class="modal-cards">'+detailCard('订单号数量',count)+'</div>'
+        +(ids.length
+          ? '<div class="order-list">'+ids.map(function(id,i){
+              return '<div class="order-item"><span class="num">'+esc(id)+'</span>'
+                +'<span style="color:var(--muted)">#'+(i+1)+'</span></div>';
+            }).join('')+'</div>'
+          : '<div class="modal-empty">未识别到订单号</div>');
+      return;
+    }
+
+    var u=data.user||{};
+    var account=u.douyin_id||u.xiaohongshu_id||u.wechat_id||'';
+    detailModalBody.innerHTML=detailThumbs(it)
+      +detailBanner(data)
+      +'<div class="modal-cards">'
+      +detailCard('用户昵称',u.nickname)
+      +detailCard('账号（抖音号/小红书号/微信号）',account)
+      +detailCard('对话框对象昵称',data.chat_object_name)
+      +detailCard('手机号码',data.phone)
+      +detailCard('地区（微信）',u.region)
+      +'</div>';
+  }
+
+  function openDetailModal(it){
+    detailModal.classList.remove('hide');
+    document.body.style.overflow='hidden';
+    detailModalMeta.innerHTML='';
+    detailModalRaw.textContent='';
+    detailModalBody.innerHTML='<div class="status on" style="display:flex;justify-content:center;padding:24px">'
+      +'<span class="spinner"></span><span>加载中…</span></div>';
+    fetch('/task/'+it.task_id)
+      .then(function(r){ return r.json(); })
+      .then(function(t){
+        if(t.code!==0){
+          detailModalBody.innerHTML='<div class="modal-error">'+esc(t.message||'查询失败')+'</div>';
+          return;
+        }
+        renderDetailTask(it,t);
+      })
+      .catch(function(e){
+        detailModalBody.innerHTML='<div class="modal-error">请求失败：'+esc(e.message||'未知错误')+'</div>';
+      });
+  }
+
+  function closeDetailModal(){
+    detailModal.classList.add('hide');
+    document.body.style.overflow='';
+  }
+
+  detailModalClose.addEventListener('click', closeDetailModal);
+  detailModal.addEventListener('click', function(e){
+    if(e.target===detailModal) closeDetailModal();
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape' && !detailModal.classList.contains('hide')) closeDetailModal();
+  });
+  detailModalRawToggle.addEventListener('click', function(){
+    var hidden=detailModalRaw.classList.toggle('hide');
+    detailModalRawToggle.textContent=hidden?'展开原始 JSON':'收起原始 JSON';
+  });
 
   function loadData(){
     dShowAlert(null);
@@ -606,9 +825,9 @@
         dNext.disabled = res.page>=dPages;
         if(!res.items.length){
           dRows.innerHTML='<tr><td colspan="9" style="padding:18px;color:var(--muted);text-align:center">暂无数据</td></tr>';
-          dDetailWrap.style.display='none';
           return;
         }
+        var currentItems=res.items;
         function thumb(tid,n){
           return '<a href="/task/'+tid+'/image/'+n+'" target="_blank" title="点击查看大图">'
             +'<img loading="lazy" src="/task/'+tid+'/image/'+n+'" '
@@ -633,15 +852,9 @@
             +'<td style="padding:9px 10px"><a href="javascript:void(0)" data-tid="'+esc(it.task_id)+'" style="color:var(--accent)">查看</a></td>'
             +'</tr>';
         }).join('');
-        // 绑定“查看”
-        dRows.querySelectorAll('a[data-tid]').forEach(function(a){
-          a.addEventListener('click', function(){
-            var tid=a.getAttribute('data-tid');
-            fetch('/task/'+tid).then(function(r){return r.json();}).then(function(t){
-              dDetail.textContent=JSON.stringify(t,null,2);
-              dDetailWrap.style.display='block';
-            });
-          });
+        // 绑定“查看”：弹窗展示该任务识别结果
+        dRows.querySelectorAll('a[data-tid]').forEach(function(a, idx){
+          a.addEventListener('click', function(){ openDetailModal(currentItems[idx]); });
         });
       })
       .catch(function(e){ dShowAlert('请求失败：'+(e.message||'未知错误')); });

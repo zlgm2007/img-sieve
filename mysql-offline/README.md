@@ -40,10 +40,12 @@ sudo IMGSIEVE_DB_PASSWORD='一个强密码' ./install.sh
 
 ## 然后两台机器的 img-sieve 都配 .env
 
+在 img-sieve 目录执行 `./install.sh`，按提示输入 MySQL 主机与密码即可自动写入 `.env`；机器 A 填 `127.0.0.1`，机器 B 填机器 A 的内网 IP。
+
 ```bash
-cp .env.example .env
-# 编辑 .env，把 IMG_SIEVE_MYSQL_HOST 填成「机器 A 的内网 IP」
+cd /opt/server/img-sieve
+./install.sh --mysql-host 10.237.179.21 --mysql-password '业务库强密码'
 ./keepalive.sh start --port 8080
 ```
 
-机器 A 和机器 B 的 `.env` 只有 `HOST` 都指向机器 A，其余相同。
+机器 A 和机器 B 的 `.env` 只有 `HOST` 指向不同，其余账号、端口、库名、密码保持一致；也可以跳过交互后手动 `vi .env`。

@@ -4,11 +4,13 @@
 
 - recognize：人脉识别（抖音 / 小红书 / 微信），主页(联系人) + 对话框配对，
   提取昵称、平台账号、地区、手机号，并核对两处昵称是否一致。
-- recognize_order：订单识别，单张订单列表页，抽取全部订单号列表。
+- recognize_order：订单识别，单张订单截图（列表页 / 票据 / 详情页），抽取订单号列表。
 """
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 from . import ocr
 from .extractor import build_result, build_order_result
@@ -48,11 +50,34 @@ def recognize(image_paths, backend=None, explicit_roles=None):
     }
 
 
+def _rotate_order_image(path, angle):
+    """把单张票据旋转后写入临时 JPEG，返回临时路径；调用方负责删除。"""
+    from PIL import Image
+
+    tmp = tempfile.NamedTemporaryFile(prefix="order-rot-", suffix=".jpg", delete=False)
+    tmp.close()
+    try:
+        with Image.open(path) as im:
+            if im.mode in ("RGBA", "P"):
+                im = im.convert("RGB")
+            im.rotate(angle, expand=True).save(tmp.name, format="JPEG", quality=95)
+        return tmp.name
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
+
+
 def recognize_order(image_paths, backend=None):
-    """订单识别：一张（或多张）订单列表页截图 → 订单号列表。
+    """订单识别：订单截图 → 订单号列表。
+
+    支持三类截图：订单列表页（一张图多个单号）、手工票据（OMS单号）、
+    订单详情页（订单编号，通常 1 个单号）。出参格式保持一致。
 
     Args:
-        image_paths: 图片绝对路径列表（常规为 1 张）
+        image_paths: 图片绝对路径列表（订单接口常规为 1 张）
         backend: vision|tesseract|rapidocr|mock，默认 auto
 
     Returns:
@@ -66,6 +91,25 @@ def recognize_order(image_paths, backend=None):
     results = ocr.run_ocr(image_paths, backend=backend)
     used_backend = backend or ocr.auto_driver(image_paths)
     data = build_order_result(results)
+
+    # 方向兜底：手工票据可能横放/倒置；首遍未抽到单号时，仅对单张图尝试旋转。
+    if (used_backend != "mock" and data["order_count"] == 0
+            and len(image_paths) == 1):
+        for angle in (90, 180, 270):
+            tmp_path = None
+            try:
+                tmp_path = _rotate_order_image(image_paths[0], angle)
+                rotated_results = ocr.run_ocr([tmp_path], backend=used_backend)
+                rotated_data = build_order_result(rotated_results)
+                if rotated_data["order_count"] > 0:
+                    results, data = rotated_results, rotated_data
+                    break
+            except Exception:
+                continue
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
     return {
         "code": 0,
         "message": "ok",

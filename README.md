@@ -3,14 +3,14 @@
 两条独立业务线，共享同一套 RapidOCR 本地离线引擎：
 
 - **人脉识别**：上传「主页 / 联系人」+「消息对话框」两张截图，自动提取昵称、抖音号 / 小红书号 / 微信号、地区、手机号，并核对两处昵称是否一致。
-- **订单识别**：上传一张订单列表页截图，抽取页面上全部订单号，按阅读顺序返回订单号列表。
+- **订单识别**：上传一张订单截图，支持订单列表页、手工票据、订单详情页，按阅读顺序返回统一的订单号列表。
 
 本地部署、**纯内网离线运行、图片不出内网**，不依赖任何云端 OCR。
 
 ## 核心亮点
 
 - **支持抖音 + 小红书 + 微信**：一套 RapidOCR（PP-OCR v4）自动区分平台与场景，无需分别部署
-- **订单号批量抽取**：单张订单列表页可识别多个订单号，前缀锚定，商品编码 / SKU / 水印不混入
+- **订单号锚定抽取**：列表页 `订单号：` 可识别多个；票据 `OMS单号：`、详情页 `订单编号：` 通常识别 1 个；商品编码 / SKU / 水印不混入
 - **中文识别准**：RapidOCR 内置 ONNX 模型，昵称 / 账号 / 手机号 / 订单号实测准确
 - **同步 + 异步**：同步阻塞接口；配 MySQL 后支持任务队列、后台 worker 识别、多机共享
 - **零联网**：运行时全程无网络请求，适合纯内网
@@ -26,20 +26,21 @@
 
 > 异步识别、任务记录、后台 worker 需要 MySQL：先在项目根目录配置 `.env`（见下文「异步识别 / 多机部署」），再用 `./keepalive.sh start` 启动。
 
-浏览器打开两个独立页面（左侧菜单可互相跳转）：
+浏览器打开三个独立页面，左侧菜单可互相跳转：一级菜单为人脉识别、订单识别、任务记录；人脉 / 订单子菜单为同步识别、异步识别，任务记录子菜单为任务记录、统计。
 
 | 页面 | 地址 | 上传内容 |
 | --- | --- | --- |
 | **人脉识别** | `http://<服务地址>:8080/` | 主页 / 联系人截图 + 对话框截图两张图 |
-| **订单识别** | `http://<服务地址>:8080/order` | 一张订单列表页截图 |
+| **订单识别** | `http://<服务地址>:8080/order` | 一张订单截图（列表页 / 票据 / 详情页） |
+| **识别统计** | `http://<服务地址>:8080/stats` | 近 7 天人脉 / 订单按日汇总柱状图 |
 
-人脉页展示昵称、抖音号 / 小红书号 / 微信号、地区、手机号，以及两处昵称是否一致；订单页展示识别到的订单号总数与编号订单号列表。
+人脉页展示昵称、抖音号 / 小红书号 / 微信号、地区、手机号，以及两处昵称是否一致；订单页展示识别到的订单号总数与订单号列表。
 
 - 人脉样例：抖音「叫我大猫 / jiaowodamao996 / 手机号」昵称一致 ✅；小红书「滴滴嗒哒 / 小红书号」与对话框「予行记」昵称不一致。
-- 订单样例：一张列表页识别出 4 个订单号，按页面顺序展示。
+- 订单样例：列表页一张图识别出 4 个订单号；手工票据取 `OMS单号：` 后编码，详情页取 `订单编号：` 后编码，均返回长度为 1 的 `order_ids` 数组。
 
 > 网页为单文件自包含（内联样式与脚本，无外部资源）。主要接口：  
-> `GET /` 人脉识别网页・`GET /order` 订单识别网页・`POST /recognize` 人脉同步・`POST /recognize/async` 人脉异步・`POST /recognize-order` 订单同步・`POST /recognize-order/async` 订单异步・`GET /task/{task_id}` 任务查询・`GET /health` 健康检查
+> `GET /` 人脉识别网页・`GET /order` 订单识别网页・`GET /stats` 统计网页・`POST /recognize` 人脉同步・`POST /recognize/async` 人脉异步・`POST /recognize-order` 订单同步・`POST /recognize-order/async` 订单异步・`GET /task/{task_id}` 任务查询・`GET /admin/stats` 统计聚合・`GET /health` 健康检查
 
 ---
 
@@ -52,8 +53,10 @@
 # 微信联系人页 + 对话框
 ./.venv_test/bin/python cli.py raw/wx20261022094534150.jpg raw/wx20261022094522060.jpg
 
-# 订单识别（order）：单张订单列表页
+# 订单识别（order）：订单列表页 / 手工票据 / 订单详情页，均为单张图
 ./.venv_test/bin/python cli.py --mode order raw/order20261022094541207.jpg
+./.venv_test/bin/python cli.py --mode order raw/orderA20261022150516331.jpg
+./.venv_test/bin/python cli.py --mode order raw/orderB20261022150541507.jpg
 
 # 指定后端 / 显式指定角色（仅人脉模式）
 python3 cli.py <主页图> <对话框图> --backend rapidocr|vision|tesseract|mock
@@ -139,7 +142,7 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 > 人脉：`data.nickname_consistent` 为主页昵称与对话框对象昵称是否一致（`true/false/null`），等价于 `data.nickname_check.consistent`；按前 **5 位前缀匹配**，容忍昵称过长被截断。平台账号按 `user.platform` 落到对应字段：抖音 `douyin_id`、小红书 `xiaohongshu_id`、微信 `wechat_id` + `region`。
 >
-> 订单：`data.order_count` 为订单号数量，`data.order_ids` 为按页面阅读顺序排列、去重后的订单号列表；未识别到时 `order_count=0`、`order_ids=[]`。
+> 订单：`data.order_count` 为订单号数量，`data.order_ids` 为按页面阅读顺序排列、去重后的订单号列表；列表页可多个，票据 / 详情页通常为 1 个；未识别到时 `order_count=0`、`order_ids=[]`。标签口径：列表页 `订单号：`、票据 `OMS单号：`（兼容 OCR 误识 `QMS单号：`）、详情页 `订单编号：`。
 
 ---
 
@@ -185,9 +188,24 @@ sudo firewall-cmd --reload
 
 > MySQL 5.7 默认密码策略：密码须大写 + 小写 + 数字 + 特殊符号、长度 ≥ 8。
 
-### 2. 创建 .env（每台机器都要，内容一致）
+### 2. 配置 .env（每台机器都要，内容一致）
 
-`./install.sh` 执行成功后会自动把 `.env.example` 复制为 `.env`（已存在则不覆盖）。进入部署目录编辑：
+执行 `./install.sh` 时，脚本会自动把 `.env.example` 复制为 `.env`（已存在则不覆盖），并在终端交互询问：
+
+- **MySQL 服务 IP/主机**：本机 MySQL 填 `127.0.0.1`；机器 B/C 填机器 A 的内网 IP（如 `10.237.179.21`）。
+- **数据库密码**：输入时不回显；直接回车保留 `.env` 中已有密码，本机无密码可留空。
+- 端口、账号、库名默认 `3306` / `imgsieve` / `imgsieve`，可在 `.env` 中调整。
+
+自动化部署也可跳过交互直接传入：
+
+```bash
+cd /opt/server/img-sieve
+./install.sh --mysql-host 10.237.179.21 --mysql-password '业务库强密码'
+# 仅跑同步识别、跳过 MySQL 配置：
+./install.sh --skip-mysql
+```
+
+交互时选择跳过，或需要手动修改时，进入部署目录编辑：
 
 ```bash
 cd /opt/server/img-sieve
