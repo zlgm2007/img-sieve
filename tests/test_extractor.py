@@ -11,12 +11,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from img_sieve import ocr  # noqa: E402
 from img_sieve.extractor import (extract_phone, extract_user_info,  # noqa: E402
                                  extract_chat_object_name, compare_nicknames,
-                                 detect_platform, build_result, detect_roles)
+                                 detect_platform, build_result, detect_roles,
+                                 extract_order_ids, build_order_result)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USER_IMG = os.path.join(BASE, "raw", "20261015115909_4787_84.jpg")
 CHAT_IMG = os.path.join(BASE, "raw", "20261015115910_4788_84.jpg")
 XHS_IMG = os.path.join(BASE, "raw", "xhs20261015144009325.jpg")
+WX_USER_IMG = os.path.join(BASE, "raw", "wx20261022094534150.jpg")
+WX_CHAT_IMG = os.path.join(BASE, "raw", "wx20261022094522060.jpg")
+ORDER_IMG = os.path.join(BASE, "raw", "order20261022094541207.jpg")
 
 
 class TestExtractor(unittest.TestCase):
@@ -84,6 +88,67 @@ class TestExtractor(unittest.TestCase):
                             explicit_roles={CHAT_IMG: "user", USER_IMG: "chat"})
         # chat 图无抖音号 → 昵称/抖音号应为空
         self.assertIsNone(data["user"]["douyin_id"])
+
+
+class TestWechatExtractor(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.results = ocr.run_mock([WX_USER_IMG, WX_CHAT_IMG, ORDER_IMG])
+        cls.user = next(r for r in cls.results if "34150" in r["path"])
+        cls.chat = next(r for r in cls.results if "22060" in r["path"])
+        cls.order = next(r for r in cls.results if "094541207" in r["path"])
+
+    def test_wechat_contact_fields(self):
+        u = extract_user_info(self.user["observations"])
+        self.assertEqual(u["platform"], "wechat")
+        self.assertEqual(u["nickname"], "王云13951905083")
+        self.assertEqual(u["wechat_id"], "Z071216xy")
+        self.assertEqual(u["region"], "江苏南京")
+        self.assertIsNone(u["douyin_id"])
+        self.assertIsNone(u["xiaohongshu_id"])
+
+    def test_wechat_chat_title(self):
+        # 标题旁备注图标被 OCR 误识的尾部 Q 应被清洗
+        self.assertEqual(extract_chat_object_name(self.chat["observations"]),
+                         "王云13951905083")
+
+    def test_wechat_roles(self):
+        roles = detect_roles([self.user, self.chat])
+        self.assertEqual(roles.get(self.user["path"]), "user")
+        self.assertEqual(roles.get(self.chat["path"]), "chat")
+
+    def test_build_result_wechat_consistent(self):
+        data = build_result([self.user, self.chat])
+        self.assertEqual(data["user"]["nickname"], "王云13951905083")
+        self.assertEqual(data["user"]["wechat_id"], "Z071216xy")
+        self.assertEqual(data["user"]["region"], "江苏南京")
+        self.assertEqual(data["chat_object_name"], "王云13951905083")
+        self.assertIs(data["nickname_check"]["consistent"], True)
+        self.assertIsNone(data["phone"])
+
+
+class TestOrderExtractor(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.results = ocr.run_mock([ORDER_IMG])
+        cls.order = cls.results[0]
+
+    def test_order_extraction_ordered(self):
+        ids = extract_order_ids(self.order["observations"])
+        self.assertEqual(ids, [
+            "210100027596213478",
+            "210100027600353478",
+            "210100027598393478",
+            "210100027600333478",
+        ])
+
+    def test_build_order_result(self):
+        data = build_order_result([self.order])
+        self.assertEqual(data["order_count"], 4)
+        self.assertEqual(len(data["order_ids"]), 4)
+        # 商品编码 / 水印 / 日期不得混入订单号列表
+        self.assertNotIn("DA1329440", data["order_ids"])
+        self.assertNotIn("12449819689", data["order_ids"])
 
 
 if __name__ == "__main__":

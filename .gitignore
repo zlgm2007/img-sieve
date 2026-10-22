@@ -16,6 +16,7 @@ bin/ocr_helper
 # 自包含 Linux 运行时（build-linux-runtime.sh 生成，体积大，不应提交）
 runtime/
 .pybs_tmp/
+cache/
 
 # 下载的 OCR 语言数据（可由脚本重新下载）
 tessdata/

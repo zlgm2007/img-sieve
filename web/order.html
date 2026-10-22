@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单号识别 · img-sieve</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32' height='32' rx='7' fill='%230e9f8a'/%3E%3Cpath d='M8 23V9h4.5l6 8.5V9H23v14h-4.5L12.5 14.5V23z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#ffffff; --line:#e3e8ee; --ink:#1c2733;
+    --muted:#64748b; --accent:#0e9f8a; --accent-ink:#ffffff;
+    --ok:#0e9f8a; --err:#d64545; --warn:#d97706; --shadow:0 1px 2px rgba(20,30,45,.06),0 6px 20px rgba(20,30,45,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+
+  /* ===== 布局：左侧菜单 + 主区 ===== */
+  .layout{display:flex;min-height:100vh}
+  .side{width:200px;background:var(--card);border-right:1px solid var(--line);padding:18px 0;flex:none}
+  .side .logo{font-weight:700;font-size:16px;padding:0 18px 18px;color:var(--accent)}
+  .menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:11px 18px;
+    font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-item:hover{background:#f4f6f8}
+  .menu-item.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-item{text-decoration:none}
+  /* 一级菜单 */
+  .menu-parent{display:flex;align-items:center;gap:7px;width:100%;text-align:left;border:none;background:none;
+    padding:11px 18px;font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-parent:hover{background:#f4f6f8}
+  .menu-parent.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-parent{text-decoration:none}
+  .menu-arrow{font-size:10px;line-height:1;flex:none;opacity:.7;transition:transform .15s}
+  .menu-parent.collapsed .menu-arrow{transform:rotate(-90deg)}
+  /* 二级子菜单 */
+  .menu-children{display:block}
+  .menu-children.collapsed{display:none}
+  .menu-child{padding-left:38px;font-size:13px}
+  .main{flex:1;min-width:0}
+  @media (max-width:700px){
+    .layout{flex-direction:column}
+    .side{width:100%;display:flex;align-items:center;flex-wrap:wrap;padding:8px 12px}
+    .side .logo{padding:0 12px 0 0;margin:0}
+    .menu-item,.menu-parent{display:inline-block;width:auto;border-left:none;border-bottom:3px solid transparent;padding:8px 12px}
+    .menu-item.active,.menu-parent.active{border-left:none;border-bottom-color:var(--accent)}
+    .menu-children{display:inline-block}
+  }
+
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  header{padding:8px 0 18px}
+  h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--muted);font-size:13px;margin:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:18px}
+  .up{position:relative;border:1.5px dashed var(--line);border-radius:12px;
+    padding:14px;background:#fafbfc;transition:border-color .15s}
+  .up.drag{border-color:var(--accent);background:#eefaf8}
+  .up-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .up-title{font-weight:600;font-size:14px}
+  .up-hint{color:var(--muted);font-size:12px}
+  .slot{position:relative;min-height:160px;border:1px solid var(--line);border-radius:10px;
+    overflow:hidden;background:#fff;display:flex;align-items:center;justify-content:center}
+  .slot.empty{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 10px,#f2f4f7 10px,#f2f4f7 20px)}
+  .slot.placeholder{color:var(--muted);font-size:13px;text-align:center;padding:12px;cursor:pointer}
+  .slot.placeholder svg{display:block;margin:0 auto 6px;opacity:.5}
+  .slot img{width:100%;height:100%;max-height:320px;object-fit:contain;display:block;background:#fff}
+  .clear{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;
+    border:none;background:rgba(20,30,45,.55);color:#fff;cursor:pointer;
+    display:none;align-items:center;justify-content:center;padding:0}
+  .clear svg{width:12px;height:12px}
+  .up.has-img .clear{display:flex}
+  .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px;align-items:center}
+  button.primary{border:none;background:var(--accent);color:var(--accent-ink);padding:12px 26px;
+    border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:filter .15s;font-family:inherit}
+  button.primary:hover{filter:brightness(.95)}
+  button.primary:disabled{opacity:.5;cursor:not-allowed}
+  .status{display:none;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+  .status.on{display:flex}
+  .spinner{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .result{margin-top:18px}
+  .result h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+  .cards{display:grid;gap:10px}
+  .order-row{display:flex;align-items:center;gap:12px;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow)}
+  .order-idx{width:28px;height:28px;border-radius:50%;background:#eefaf8;color:var(--accent);
+    font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;font-size:13px}
+  .order-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:600;letter-spacing:.02em}
+  .order-empty{color:var(--muted);font-size:14px;padding:18px;text-align:center}
+  .raw{margin-top:14px}
+  .raw pre{background:#0f172a;color:#d7e0ea;padding:14px;border-radius:10px;overflow:auto;
+    font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;white-space:pre-wrap;word-break:break-all}
+  .alert{padding:12px 14px;border-radius:10px;font-size:14px;margin-top:18px;display:none}
+  .alert.err{background:#fdecec;color:#a22;border:1px solid #f3c6c6;display:block}
+  .hide{display:none!important}
+  footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+  footer a{color:var(--accent);text-decoration:none}
+
+  .taskbox{margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid var(--line);
+    border-radius:10px;font-size:13px;color:var(--muted);display:none}
+  .taskbox.on{display:block}
+  .taskbox b{color:var(--ink);font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .badge.pending{background:#eef2f7;color:#64748b}
+  .badge.processing{background:#fef3e2;color:#b45309}
+  .badge.done{background:#e6f6f2;color:#0b7a68}
+  .badge.failed{background:#fdecec;color:#a22}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <div class="logo">img-sieve</div>
+
+    <a class="menu-item menu-parent" href="/">人脉识别</a>
+
+    <div class="menu-parent active" id="groupOrder" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">订单识别</span>
+    </div>
+    <div class="menu-children" id="childrenOrder">
+      <button class="menu-item menu-child active" data-page="sync" type="button">同步识别</button>
+      <button class="menu-item menu-child" data-page="async" type="button">异步识别</button>
+    </div>
+
+    <a class="menu-item menu-parent" href="/?tab=data">任务记录</a>
+  </aside>
+  <main class="main">
+  <div class="wrap">
+    <header>
+      <h1>订单识别</h1>
+      <p class="sub">上传订单列表页截图，自动抽取页面上全部订单号，按页面从上到下顺序返回。图片仅本地处理。</p>
+    </header>
+
+    <!-- ===================== 同步识别 ===================== -->
+    <div id="page-sync">
+      <section class="card">
+        <div class="up" id="slotOrder">
+          <div class="up-head">
+            <span class="up-title">订单列表页截图</span>
+            <span class="up-hint">一张图可含多个订单号</span>
+          </div>
+          <div class="slot empty" id="dropOrder" tabindex="0" role="button" aria-label="选择订单截图">
+            <div class="placeholder" id="phOrder">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
+              点击或拖拽选择图片
+            </div>
+            <img id="preOrder" class="hide" alt="订单截图预览">
+            <button class="clear" id="clearOrder" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+          <input type="file" id="fileOrder" accept="image/*" hidden>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="btnRun" disabled>开始识别</button>
+          <div class="status" id="status"><span class="spinner"></span><span id="statusText">识别中…</span></div>
+        </div>
+      </section>
+
+      <div class="alert" id="alert"></div>
+
+      <section class="result hide" id="result">
+        <h2>识别结果 <span class="badge done" id="rCount"></span></h2>
+        <div class="cards" id="orderList"></div>
+        <div class="raw"><pre id="rawJson"></pre></div>
+      </section>
+    </div>
+
+    <!-- ===================== 异步识别 ===================== -->
+    <div id="page-async" class="hide">
+      <section class="card">
+        <div class="up" id="aSlotOrder">
+          <div class="up-head">
+            <span class="up-title">订单列表页截图</span>
+            <span class="up-hint">提交后后台识别，轮询查询结果</span>
+          </div>
+          <div class="slot empty" id="aDropOrder" tabindex="0" role="button" aria-label="选择订单截图">
+            <div class="placeholder" id="aPhOrder">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-4-4-9 9"/></svg>
+              点击或拖拽选择图片
+            </div>
+            <img id="aPreOrder" class="hide" alt="订单截图预览">
+            <button class="clear" id="aClearOrder" type="button" aria-label="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+          <input type="file" id="aFileOrder" accept="image/*" hidden>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="aBtn" disabled>提交异步任务</button>
+          <div class="status" id="aStatus"><span class="spinner"></span><span id="aStatusText">提交中…</span></div>
+        </div>
+
+        <div class="taskbox" id="aTaskBox">
+          任务 ID：<b id="aTaskId"></b><span class="badge pending" id="aBadge">pending</span><br>
+          <small id="aTaskMeta"></small>
+        </div>
+      </section>
+
+      <div class="alert" id="aAlert"></div>
+
+      <section class="result hide" id="aResult">
+        <h2>识别结果 <span class="badge done" id="aCount"></span></h2>
+        <div class="cards" id="aOrderList"></div>
+        <div class="raw"><pre id="aRawJson"></pre></div>
+      </section>
+    </div>
+
+    <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · <a href="/">人脉识别</a> · <a href="/?tab=data">任务记录</a></footer>
+  </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------- 菜单切换 ---------- */
+  var pages={sync:document.getElementById('page-sync'),
+             async:document.getElementById('page-async')};
+  var groupOrder=document.getElementById('groupOrder'),
+      childrenOrder=document.getElementById('childrenOrder');
+
+  function activate(page){
+    Object.keys(pages).forEach(function(k){ pages[k].classList.toggle('hide', k!==page); });
+    document.querySelectorAll('.menu-child[data-page]').forEach(function(b){
+      b.classList.toggle('active', b.dataset.page===page);
+    });
+  }
+
+  document.querySelectorAll('.menu-child[data-page]').forEach(function(btn){
+    btn.addEventListener('click', function(){ activate(btn.dataset.page); });
+  });
+
+  /* 一级分组：点击折叠 / 展开子菜单 */
+  groupOrder.addEventListener('click', function(){
+    childrenOrder.classList.toggle('collapsed');
+    groupOrder.classList.toggle('collapsed');
+  });
+
+  /* ---------- 通用上传槽绑定 ---------- */
+  function setPreview(imgEl, placeholderEl, slotEl, file){
+    if(!file){ placeholderEl.classList.remove('hide'); imgEl.classList.add('hide'); slotEl.classList.remove('has-img'); return; }
+    placeholderEl.classList.add('hide');
+    imgEl.classList.remove('hide');
+    imgEl.src=URL.createObjectURL(file);
+    slotEl.classList.add('has-img');
+  }
+  function bindSlot(inputEl, dropEl, imgEl, placeholderEl, slotEl, onChange){
+    dropEl.addEventListener('click', function(){ inputEl.click(); });
+    inputEl.addEventListener('change', function(){ setPreview(imgEl, placeholderEl, slotEl, inputEl.files[0]); onChange(); });
+    ['dragover','dragenter'].forEach(function(ev){
+      dropEl.addEventListener(ev, function(e){ e.preventDefault(); dropEl.classList.add('drag'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      dropEl.addEventListener(ev, function(e){ e.preventDefault(); dropEl.classList.remove('drag'); });
+    });
+    dropEl.addEventListener('drop', function(e){
+      var f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if(f){ inputEl.files=e.dataTransfer.files; setPreview(imgEl, placeholderEl, slotEl, f); onChange(); }
+    });
+    var clearBtn=slotEl.querySelector('.clear');
+    if(clearBtn){
+      clearBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        inputEl.value='';
+        setPreview(imgEl, placeholderEl, slotEl, null);
+        onChange();
+      });
+    }
+  }
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+  function renderOrderList(listEl, countEl, data){
+    data = data || {};
+    var ids = data.order_ids || [];
+    countEl.textContent = '共 ' + (data.order_count !== undefined ? data.order_count : ids.length) + ' 个订单号';
+    if(!ids.length){
+      listEl.innerHTML = '<div class="order-empty">未识别到订单号，请确认截图包含「订单号：」行</div>';
+      return;
+    }
+    listEl.innerHTML = ids.map(function(id, i){
+      return '<div class="order-row">'
+        + '<div class="order-idx">' + (i+1) + '</div>'
+        + '<div class="order-id">' + esc(id) + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  /* ===================== 同步识别 ===================== */
+  var fileOrder=document.getElementById('fileOrder'),
+      btn=document.getElementById('btnRun'),
+      statusEl=document.getElementById('status'),
+      alertEl=document.getElementById('alert'),
+      resultEl=document.getElementById('result');
+
+  function updateSyncBtn(){ btn.disabled = fileOrder.files.length===0; }
+  bindSlot(fileOrder, document.getElementById('dropOrder'), document.getElementById('preOrder'),
+           document.getElementById('phOrder'), document.getElementById('slotOrder'), updateSyncBtn);
+
+  btn.addEventListener('click', function(){
+    if(!fileOrder.files.length) return;
+    var fd=new FormData();
+    fd.append('order', fileOrder.files[0]);
+
+    alertEl.className='alert hide'; alertEl.textContent='';
+    statusEl.classList.add('on');
+    btn.disabled=true;
+
+    fetch('/recognize-order',{method:'POST',body:fd})
+      .then(function(r){ return r.json().catch(function(){ throw new Error('响应解析失败'); }); })
+      .then(function(res){
+        if(res && res.code===0 && res.data){
+          renderOrderList(document.getElementById('orderList'), document.getElementById('rCount'), res.data);
+          document.getElementById('rawJson').textContent=JSON.stringify(res,null,2);
+          resultEl.classList.remove('hide');
+        }
+        else { alertEl.textContent=(res&&res.message)||'识别失败'; alertEl.className='alert err'; resultEl.classList.add('hide'); }
+      })
+      .catch(function(e){ alertEl.textContent='请求失败：'+(e.message||'未知错误'); alertEl.className='alert err'; resultEl.classList.add('hide'); })
+      .finally(function(){ statusEl.classList.remove('on'); btn.disabled=false; updateSyncBtn(); });
+  });
+
+  /* ===================== 异步识别 ===================== */
+  var aFileOrder=document.getElementById('aFileOrder'),
+      aBtn=document.getElementById('aBtn'),
+      aStatus=document.getElementById('aStatus'),
+      aAlert=document.getElementById('aAlert'),
+      aTaskBox=document.getElementById('aTaskBox'),
+      aTaskId=document.getElementById('aTaskId'),
+      aBadge=document.getElementById('aBadge'),
+      aTaskMeta=document.getElementById('aTaskMeta'),
+      aResult=document.getElementById('aResult');
+  var pollTimer=null;
+
+  function updateAsyncBtn(){ aBtn.disabled = aFileOrder.files.length===0; }
+  bindSlot(aFileOrder, document.getElementById('aDropOrder'), document.getElementById('aPreOrder'),
+           document.getElementById('aPhOrder'), document.getElementById('aSlotOrder'), updateAsyncBtn);
+
+  function setBadge(status){ aBadge.className='badge '+status; aBadge.textContent=status; }
+  function aShowAlert(msg){
+    if(msg){ aAlert.textContent=msg; aAlert.className='alert err'; }
+    else{ aAlert.textContent=''; aAlert.className='alert hide'; }
+  }
+
+  function pollTask(tid){
+    function tick(){
+      fetch('/task/'+tid)
+        .then(function(r){ return r.json(); })
+        .then(function(t){
+          setBadge(t.status);
+          aTaskMeta.textContent='提交于 '+t.created_at+(t.finished_at?(' · 完成于 '+t.finished_at):'');
+          if(t.status==='done'){
+            aStatus.classList.remove('on');
+            aBtn.disabled=false;
+            var r = t.result || {};
+            renderOrderList(document.getElementById('aOrderList'), document.getElementById('aCount'), r.data);
+            document.getElementById('aRawJson').textContent=JSON.stringify(t,null,2);
+            aResult.classList.remove('hide');
+            return;
+          }
+          if(t.status==='failed'){
+            aStatus.classList.remove('on');
+            aBtn.disabled=false;
+            aShowAlert('识别失败：'+(t.error||'未知错误'));
+            return;
+          }
+          aStatus.classList.add('on');
+          document.getElementById('aStatusText').textContent =
+            t.status==='processing' ? 'worker 识别中…' : '排队等待 worker…';
+          pollTimer=setTimeout(tick, 5000);
+        })
+        .catch(function(e){
+          aStatus.classList.remove('on');
+          aBtn.disabled=false;
+          aShowAlert('查询任务失败：'+(e.message||'未知错误'));
+        });
+    }
+    tick();
+  }
+
+  aBtn.addEventListener('click', function(){
+    if(!aFileOrder.files.length) return;
+    var fd=new FormData();
+    fd.append('order', aFileOrder.files[0]);
+
+    if(pollTimer){ clearTimeout(pollTimer); pollTimer=null; }
+    aShowAlert(null);
+    aResult.classList.add('hide');
+    aTaskBox.classList.remove('on');
+    aStatus.classList.add('on');
+    aBtn.disabled=true;
+    document.getElementById('aStatusText').textContent='提交中…';
+
+    fetch('/recognize-order/async',{method:'POST',body:fd})
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && res.code===0 && res.task_id){
+          aTaskId.textContent=res.task_id;
+          aTaskBox.classList.add('on');
+          pollTask(res.task_id);
+        } else {
+          aStatus.classList.remove('on');
+          aBtn.disabled=false;
+          aShowAlert((res&&res.message)||'提交异步任务失败（检查 MySQL/worker 是否启动）');
+        }
+      })
+      .catch(function(e){
+        aStatus.classList.remove('on');
+        aBtn.disabled=false;
+        aShowAlert('请求失败：'+(e.message||'未知错误'));
+      });
+  });
+})();
+</script>
+</body>
+</html>
