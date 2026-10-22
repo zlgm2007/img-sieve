@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import socket
 import uuid
+from datetime import date, timedelta
 
 try:
     import pymysql
@@ -323,3 +324,51 @@ def purge_old(days: int) -> int:
         return n
     finally:
         conn.close()
+
+
+# 统计口径：场景键、展示名与图表颜色（前端图例与堆叠柱共用）。
+SCENE_META = (
+    {"key": "people", "label": "人脉识别", "color": "#0e9f8a"},
+    {"key": "order", "label": "订单识别", "color": "#f59e0b"},
+)
+
+
+def stats_by_day(days: int = 7) -> dict:
+    """近 N 天按日、按场景汇总任务量，补齐缺失日期与场景的零值。
+
+    返回：dates（日期升序）、series（每个场景一条 values）、totals（场景合计与总数）。
+    统计口径为区间内全部任务记录（同步 done 与异步各状态均计入）。
+    """
+    days = max(1, min(30, int(days)))
+    today = date.today()
+    dates = [(today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)]
+    matrix = {d: {"people": 0, "order": 0} for d in dates}
+
+    conn = connect()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            cur.execute(
+                "SELECT DATE(created_at) AS day, scene, COUNT(*) AS cnt "
+                "FROM ocr_task "
+                "WHERE DATE(created_at) >= DATE(NOW()) - INTERVAL %s DAY "
+                "GROUP BY DATE(created_at), scene",
+                (days,))
+            for row in cur.fetchall():
+                day = row["day"]
+                day = day.isoformat() if hasattr(day, "isoformat") else str(day)
+                scene = row["scene"] if row["scene"] in ("people", "order") else "people"
+                if day in matrix:
+                    matrix[day][scene] = int(row["cnt"])
+    finally:
+        conn.close()
+
+    series = []
+    totals = {"people": 0, "order": 0, "total": 0}
+    for meta in SCENE_META:
+        values = [matrix[d][meta["key"]] for d in dates]
+        total = sum(values)
+        totals[meta["key"]] = total
+        totals["total"] += total
+        series.append({"key": meta["key"], "label": meta["label"],
+                       "color": meta["color"], "values": values})
+    return {"days": days, "dates": dates, "series": series, "totals": totals}

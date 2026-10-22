@@ -8,7 +8,7 @@
 
 启动后默认监听 `0.0.0.0:8080`，根路径为网页界面。
 
-**测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /health`
+**测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）、`http://10.237.179.21:8080/stats`（统计网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`
 
 ```
 ./run.sh --host 0.0.0.0 --port 8080
@@ -21,19 +21,21 @@
 系统分两条业务线，共享同一套 OCR 后端，响应结构相互独立：
 
 - **人脉识别**（`/recognize` 系列）：抖音 / 小红书 / 微信，主页（联系人）+ 对话框配对，提取昵称、平台账号、地区、手机号并核对两处昵称是否一致。
-- **订单识别**（`/recognize-order` 系列）：单张订单列表页，抽取页面上全部订单号，返回订单号列表。
+- **订单识别**（`/recognize-order` 系列）：单张订单截图，抽取列表页、手工票据、详情页对应标签后的订单号，返回统一订单号列表。
 
 | 方法     | 路径                             | 说明                                       |
 | ------ | ------------------------------ | ---------------------------------------- |
 | `GET`  | `/`                            | 人脉识别网页界面（主页/联系人 + 对话框两张图）                |
-| `GET`  | `/order`                       | 订单识别网页界面（单张订单列表页）                        |
+| `GET`  | `/order`                       | 订单识别网页界面（单张订单截图：列表页 / 票据 / 详情页）          |
+| `GET`  | `/stats`                       | 近 7 天场景统计网页界面                            |
 | `POST` | `/recognize`                   | 人脉识别，上传 1~2 张图，返回结构化 JSON（**核心接口**，同步阻塞） |
 | `POST` | `/recognize/async`             | 人脉识别异步任务：收图立即返回 `task_id`，后台识别           |
-| `POST` | `/recognize-order`             | 订单识别，上传 **1 张**订单列表页，返回订单号列表（同步阻塞）       |
+| `POST` | `/recognize-order`             | 订单识别，上传 **1 张**订单截图，返回订单号列表（同步阻塞）       |
 | `POST` | `/recognize-order/async`       | 订单识别异步任务：收图立即返回 `task_id`，后台识别           |
 | `GET`  | `/task/{task_id}`              | 按 task_id 查询异步任务状态与识别结果                  |
 | `GET`  | `/task/{task_id}/image/{1\|2}` | 查看任务原始截图（1=第一张，2=第二张；订单任务无第二张）           |
 | `GET`  | `/admin/tasks`                 | 任务记录分页列表（含场景、文件名、状态、时间）                  |
+| `GET`  | `/admin/stats`                 | 近 N 天按日、按场景汇总任务量（统计页数据源）                  |
 | `POST` | `/admin/purge?days=N`          | 清理 N 天前的历史任务与图片（运维）                      |
 | `GET`  | `/health`                      | 健康检查                                     |
 
@@ -330,13 +332,19 @@ Boolean consistent = consistentNode.isNull() ? null : consistentNode.asBoolean()
 
 ## 订单识别：POST /recognize-order
 
-与 `/recognize` 是两条独立业务线：**只传 1 张订单列表页截图**，抽取页面上全部「订单号：」后面的订单号，按页面从上到下顺序返回列表；不做角色检测、不做跨图昵称核对。
+与 `/recognize` 是两条独立业务线：**只传 1 张订单截图**，按页面从上到下顺序返回订单号列表；不做角色检测、不做跨图昵称核对。支持三类截图：
+
+| 截图类型 | 识别标签 | 单号数量 | 说明 |
+| --- | --- | --- | --- |
+| 订单列表页 | `订单号：` | 一张图可返回多个 | 保留原有多订单号能力 |
+| 手工票据 | `OMS单号：` | 通常 1 个 | OCR 偶发把 `O` 误识为 `Q`，规则兼容 `QMS单号：` |
+| 订单详情页 | `订单编号：` | 通常 1 个 | 仍复用 `order_ids` 数组，长度为 1 |
 
 ### 入参
 
 - **Content-Type**：`multipart/form-data`
 - **请求体大小**：1 ~ 50MB（`Content-Length` 为 0 或超过 50MB 均拒绝）
-- **图片字段**：恰好 **1 张**订单列表页图片，**字段名任意**（网页前端约定字段名为 `order`）
+- **图片字段**：恰好 **1 张**订单截图（订单列表页 / 手工票据 / 订单详情页），**字段名任意**（网页前端约定字段名为 `order`）
   - 支持的图片格式：`.jpg / .jpeg / .png / .webp / .bmp / .gif`，按**文件头（magic bytes）**&#x6821;验
   - 普通文本文件会被当作表单文本字段忽略；有效图片文件数为 0 或 ≥2 均返回 400；带图片扩展名但文件头不是图片返回 400。
 - 本接口**不接收** `role=` 文本字段，无角色检测与跨图比对。
@@ -379,7 +387,8 @@ curl -X POST http://127.0.0.1:8080/recognize-order \
 | `data.order_count` | int      | 识别到的订单号数量，与 `order_ids` 长度一致         |
 | `data.order_ids`   | string[] | 订单号列表，按页面从上到下阅读顺序排列、自动去重；未识别到时为 `[]` |
 
-> 提取以「订单号：」行前缀为锚点：商品编码、SKU、水印、日期等不带前缀的数字串不会混入列表。  
+> 提取以标签前缀为锚点：`订单号：`、`OMS单号：`/`QMS单号：`、`订单编号：` 后 10~18 位数字。票据上的 `单号：DA...`、`订单编号：MM...`，详情页的 `订单行号：...`，以及商品编码、SKU、水印、日期等不会混入列表。
+> 手工票据可能横放或倒置；首遍未抽到单号时，服务层会对单张图依次尝试 90° / 180° / 270° 旋转后重试，响应格式不变。
 > 页面未识别到订单号时：`order_count = 0`、`order_ids = []`，接口仍返回 HTTP 200。
 
 **Java 对接（RestTemplate 片段）：**
@@ -414,7 +423,7 @@ JsonNode ids = root.path("data").path("order_ids");
 { "code": 400, "message": "请使用 multipart/form-data 上传图片" }
 { "code": 400, "message": "请求体大小需在 1~52428800 字节之间" }
 { "code": 400, "message": "字段 order 不是有效的图片文件" }
-{ "code": 400, "message": "订单识别仅支持上传 1 张订单列表页截图" }
+{ "code": 400, "message": "订单识别仅支持上传 1 张订单截图" }
 ```
 
 ---
@@ -447,9 +456,11 @@ JsonNode ids = root.path("data").path("order_ids");
 | `IMG_SIEVE_MYSQL_USER` | `root` | 数据库账号 |
 | `IMG_SIEVE_MYSQL_PASSWORD` | 空 | 数据库密码 |
 | `IMG_SIEVE_MYSQL_DB` | `imgsieve` | 任务库名 |
-| `IMG_SIEVE_ADMIN_TOKEN` | 空（不校验） | 仅 `/admin/purge` 鉴权；`/admin/tasks` 不校验 |
+| `IMG_SIEVE_ADMIN_TOKEN` | 空（不校验） | 仅 `/admin/purge` 鉴权；`/admin/tasks`、`/admin/stats` 不校验 |
 
-`.env` 模板（`install.sh` 在 `.env` 不存在时自动从 `.env.example` 复制一份，已存在不覆盖）：
+`install.sh` 在 `.env` 不存在时自动从 `.env.example` 复制一份（已存在不覆盖）；交互式安装会询问 MySQL 主机、端口、账号、库名与密码，后四项可回车沿用当前值或默认值，并写入 `.env`。自动化部署可使用 `--mysql-host`、`--mysql-password` 等参数跳过交互，仅同步识别可用 `--skip-mysql`。
+
+需要手动修改时：
 
 ```bash
 cd /opt/server/img-sieve
@@ -532,7 +543,7 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 
 - **Content-Type**：`multipart/form-data`
 - **请求体大小**：1 ~ 50MB
-- **图片字段**：恰好 **1 张**订单列表页图片，字段名任意；上传 0 张或 ≥2 张返回 400
+- **图片字段**：恰好 **1 张**订单截图（订单列表页 / 手工票据 / 订单详情页），字段名任意；上传 0 张或 ≥2 张返回 400
 
 **出参**（立即返回，不等待识别完成）：
 
@@ -558,7 +569,7 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 { "code": 400, "message": "请使用 multipart/form-data 上传图片" }
 { "code": 400, "message": "请求体大小需在 1~52428800 字节之间" }
 { "code": 400, "message": "字段 order 不是有效的图片文件" }
-{ "code": 400, "message": "订单识别仅支持上传 1 张订单列表页截图" }
+{ "code": 400, "message": "订单识别仅支持上传 1 张订单截图" }
 { "code": 500, "message": "任务入库失败（检查 MySQL 连接）: ..." }
 ```
 
@@ -566,7 +577,7 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 
 ```bash
 curl -X POST http://10.237.179.21:8080/recognize-order/async \
-  -F "order=@订单列表.png"
+  -F "order=@订单截图.png"
 # => {"code":0,"message":"ok","task_id":"d2c8...","status":"pending"}
 ```
 
@@ -810,6 +821,74 @@ curl "http://10.237.179.21:8080/admin/tasks?page=1"
 
 # 按时间段过滤（URL 编码时间中的空格）
 curl "http://10.237.179.21:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026-10-22%2023:59:59"
+```
+
+### GET /admin/stats
+
+近 N 天按日、按场景汇总任务量，供统计网页 `/stats` 绘制堆叠柱状图。统计口径为区间内全部任务记录：同步 `done` 与异步各状态均计入；旧记录缺少 `scene` 时按 `people` 处理。本接口不校验 `IMG_SIEVE_ADMIN_TOKEN`。
+
+**入参（Query String，可选）**
+
+| 参数    | 类型 | 默认值 | 说明 |
+| ----- | -- | --- | --- |
+| `days` | int | `7` | 统计最近多少天；非整数按 `7` 处理，实际取值限制在 `1~30` |
+
+**出参**
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "days": 7,
+  "dates": ["2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19",
+             "2026-10-20", "2026-10-21", "2026-10-22"],
+  "series": [
+    {
+      "key": "people",
+      "label": "人脉识别",
+      "color": "#0e9f8a",
+      "values": [3, 5, 0, 2, 7, 4, 6]
+    },
+    {
+      "key": "order",
+      "label": "订单识别",
+      "color": "#f59e0b",
+      "values": [1, 0, 2, 0, 3, 1, 2]
+    }
+  ],
+  "totals": { "people": 27, "order": 9, "total": 36 }
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `days` | int | 实际统计天数 |
+| `dates` | array | 日期升序，`YYYY-MM-DD`，缺失日期补零 |
+| `series` | array | 每个场景一条；`values` 顺序与 `dates` 一一对应 |
+| `series[].key` | string | `people`（人脉识别）/ `order`（订单识别） |
+| `series[].label` | string | 场景展示名，用于图例与卡片标题 |
+| `series[].color` | string | 场景图表颜色（十六进制） |
+| `series[].values` | array | 对应日期该场景任务数量，无记录为 `0` |
+| `totals.people` | int | 区间内人脉识别合计 |
+| `totals.order` | int | 区间内订单识别合计 |
+| `totals.total` | int | 场景合计之和 |
+
+**错误返回**
+
+| HTTP 状态 | `code` | 触发条件 |
+| ------- | ------ | --- |
+| `500` | `500` | 查询失败（MySQL 未连接或不可用） |
+
+```json
+{ "code": 500, "message": "查询失败（检查 MySQL 连接）: ..." }
+```
+
+**curl 示例：**
+
+```bash
+curl "http://10.237.179.21:8080/admin/stats?days=7"
 ```
 
 ### POST /admin/purge?days=N

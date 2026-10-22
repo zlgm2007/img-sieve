@@ -4,10 +4,12 @@
 功能：
 - GET  /               人脉识别网页（抖音 / 小红书 / 微信，web/ui.html）
 - GET  /order          订单识别网页（web/order.html）
+- GET  /stats          近 7 天场景统计网页（web/stats.html）
 - POST /recognize      人脉识别：上传主页(联系人) + 对话框截图，返回识别 JSON
 - POST /recognize/async  人脉识别异步任务（MySQL 队列）
-- POST /recognize-order    订单识别：上传 1 张订单列表页，返回订单号列表
+- POST /recognize-order    订单识别：上传 1 张订单截图（列表页 / 票据 / 详情页），返回订单号列表
 - POST /recognize-order/async  订单识别异步任务（MySQL 队列）
+- GET  /admin/stats      近 N 天按场景汇总任务量
 - GET  /health        健康检查
 
 用法:
@@ -33,6 +35,7 @@ from img_sieve.service import recognize, recognize_order
 _BASE = os.path.dirname(os.path.abspath(__file__))
 UI_PATH = os.path.join(_BASE, "web", "ui.html")
 ORDER_UI_PATH = os.path.join(_BASE, "web", "order.html")
+STATS_UI_PATH = os.path.join(_BASE, "web", "stats.html")
 
 MAX_BODY = 50 * 1024 * 1024  # 50MB 上限
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
@@ -102,6 +105,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"code": 404, "message": "not found"}, 404)
         elif path == "/admin/tasks":
             self._handle_list_tasks()
+        elif path == "/admin/stats":
+            self._handle_stats()
+        elif path == "/stats":
+            self._serve_stats_ui()
         else:
             self._send_json({"code": 404, "message": "not found"}, 404)
 
@@ -113,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_text(
                 "img-sieve 图片信息识别服务\n\n"
                 "POST /recognize          人脉识别（主页/联系人 + 对话框），返回 JSON\n"
-                "POST /recognize-order    订单识别（1 张订单列表页），返回订单号列表\n"
+                "POST /recognize-order    订单识别（1 张订单截图），返回订单号列表\n"
                 "GET  /health             健康检查\n"
             )
 
@@ -124,8 +131,19 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send_text(
                 "img-sieve 订单识别服务\n\n"
-                "POST /recognize-order  上传 1 张订单列表页（multipart），返回订单号 JSON\n"
+                "POST /recognize-order  上传 1 张订单截图（multipart），返回订单号 JSON\n"
                 "GET /health            健康检查\n"
+            )
+
+    def _serve_stats_ui(self):
+        try:
+            with open(STATS_UI_PATH, "r", encoding="utf-8") as f:
+                self._send_html(f.read())
+        except OSError:
+            self._send_text(
+                "img-sieve 统计服务\n\n"
+                "GET /admin/stats?days=7  近 N 天按场景汇总任务量\n"
+                "GET /health              健康检查\n"
             )
 
     def do_POST(self):
@@ -273,7 +291,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if len(files) != 1:
             self._send_json({"code": 400,
-                             "message": "订单识别仅支持上传 1 张订单列表页截图"}, 400)
+                             "message": "订单识别仅支持上传 1 张订单截图"}, 400)
             return
 
         fname, data = files[0]
@@ -327,7 +345,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if len(files) != 1:
             self._send_json({"code": 400,
-                             "message": "订单识别仅支持上传 1 张订单列表页截图"}, 400)
+                             "message": "订单识别仅支持上传 1 张订单截图"}, 400)
             return
 
         fname, data = files[0]
@@ -419,6 +437,20 @@ class Handler(BaseHTTPRequestHandler):
             "code": 0, "total": total, "page": page, "per_page": 20,
             "pages": (total + 19) // 20, "items": items,
         })
+
+    def _handle_stats(self):
+        params = dict(kv.split("=", 1) for kv in urlparse(self.path).query.split("&") if "=" in kv)
+        try:
+            days = int(params.get("days", "7"))
+        except ValueError:
+            days = 7
+        days = max(1, min(30, days))
+        try:
+            payload = db.stats_by_day(days)
+        except Exception as e:
+            self._send_json({"code": 500, "message": f"查询失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        self._send_json({"code": 0, "message": "ok", **payload})
 
     def _handle_admin_purge(self):
         expected = os.environ.get("IMG_SIEVE_ADMIN_TOKEN", "")
@@ -512,7 +544,8 @@ def main(argv=None):
     if async_ready:
         print("[img-sieve] 人脉: POST /recognize, /recognize/async | "
               "订单: POST /recognize-order, /recognize-order/async")
-        print("[img-sieve] 查询: GET /task/{task_id} | 运维: POST /admin/purge?days=N")
+        print("[img-sieve] 查询: GET /task/{task_id} | 统计: GET /admin/stats | "
+              "运维: POST /admin/purge?days=N")
     else:
         print("[img-sieve] 人脉: POST /recognize | 订单: POST /recognize-order | GET /health")
     try:

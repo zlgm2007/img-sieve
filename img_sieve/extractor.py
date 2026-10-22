@@ -1,5 +1,5 @@
 """字段提取规则：从 OCR 结果中提取 用户昵称 / 抖音号 / 小红书号 / 微信号 / 地区 / 手机号码，
-以及订单列表页的订单号列表。
+以及订单截图（列表页 / 手工票据 / 详情页）的订单号列表。
 
 输入为 ocr.run_ocr 返回的规范化结果：
 [
@@ -42,8 +42,18 @@ PLATFORM_LABEL = {
 # 微信「地区」声明行（仅微信联系人页）
 REGION_RE = re.compile(r"地区\s*[:：]\s*(.+)")
 
-# 订单号声明行（订单列表页，一张图可能有多条）
-ORDER_ID_RE = re.compile(r"订单号\s*[:：]\s*(\d{10,})")
+# 订单号声明行：
+# - 订单列表页：订单号：xxx（一张图可能有多条）
+# - 手工票据：OMS单号：xxx（OCR 偶发把 O 误识为 Q，兼容 QMS）
+# - 订单详情页：订单编号：xxx（只取编号，不取订单行号/单号/商品编码）
+# 编号限定 10~18 位数字；(?!\d) 防止吞掉相邻 OCR 碎片数字。
+ORDER_LABEL_PATTERNS = (
+    ("order_list", re.compile(r"订单号\s*[:：]\s*(\d{10,18})(?!\d)")),
+    ("oms", re.compile(r"[OQ]MS单号\s*[:：]\s*(\d{10,18})(?!\d)")),
+    ("order_detail", re.compile(r"订单编号\s*[:：]\s*(\d{10,18})(?!\d)")),
+)
+# 兼容旧引用：列表页原始规则。
+ORDER_ID_RE = ORDER_LABEL_PATTERNS[0][1]
 
 # 顶部状态栏 / 导航等干扰文本（不当作昵称）
 _NOISE = {
@@ -390,34 +400,37 @@ def build_result(results, explicit_roles=None):
 
 
 def extract_order_ids(obs):
-    """从单张订单列表页抽取全部订单号。
+    """从单张订单截图抽取全部订单号。
 
-    先按单条观察匹配（多数情况整行在一条观察内）；未命中再按行合并匹配，
-    兜底标签与数字被 OCR 拆成两条观察的情况。
+    支持三类标签：列表页「订单号」、手工票据「OMS单号」、详情页「订单编号」。
+    先按单条观察匹配；未形成完整观察的行再按同行坐标合并兜底，
+    处理标签与编号被 OCR 拆成两条观察的情况。
     返回按页面从上到下排序、去重后的订单号列表。
     """
     found = []
     seen = set()
 
-    def _push(val, box):
+    def _push(val, y1):
         if val and val not in seen:
             seen.add(val)
-            found.append((val, box["y1"]))
+            found.append((val, y1))
 
-    # 1) 逐观察匹配
+    def _match_line(text, y1):
+        for _, pattern in ORDER_LABEL_PATTERNS:
+            for m in pattern.finditer(text):
+                _push(m.group(1), y1)
+
+    # 1) 逐观察匹配（多数情况整行在一条观察内）
     for o in obs:
-        m = ORDER_ID_RE.search(o["text"])
-        if m:
-            _push(m.group(1), o["box"])
+        _match_line(o["text"], o["box"]["y1"])
 
-    # 2) 按行合并兜底
-    if not found:
-        for row in _group_rows(obs):
-            line = "".join(o["text"] for o in row)
-            m = ORDER_ID_RE.search(line)
-            if m:
-                y1 = min(o["box"]["y1"] for o in row)
-                _push(m.group(1), {"y1": y1})
+    # 2) 按行合并兜底：补齐标签与编号被 OCR 拆成两条观察的行；
+    #    已识别单号由 seen 去重，同一标签在不同行拆行也能继续兜底。
+    for row in _group_rows(obs):
+        row = sorted(row, key=lambda o: o["box"]["x1"])
+        line = "".join(o["text"] for o in row)
+        y1 = min(o["box"]["y1"] for o in row)
+        _match_line(line, y1)
 
     found.sort(key=lambda x: x[1])
     return [val for val, _ in found]

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>识别统计 · img-sieve</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32' height='32' rx='7' fill='%230e9f8a'/%3E%3Cpath d='M8 23V9h4.5l6 8.5V9H23v14h-4.5L12.5 14.5V23z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#ffffff; --line:#e3e8ee; --ink:#1c2733;
+    --muted:#64748b; --accent:#0e9f8a; --accent-ink:#ffffff;
+    --ok:#0e9f8a; --err:#d64545; --warn:#f59e0b; --shadow:0 1px 2px rgba(20,30,45,.06),0 6px 20px rgba(20,30,45,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+
+  /* ===== 布局：左侧菜单 + 主区 ===== */
+  .layout{display:flex;min-height:100vh}
+  .side{width:200px;background:var(--card);border-right:1px solid var(--line);padding:18px 0;flex:none}
+  .side .logo{font-weight:700;font-size:16px;padding:0 18px 18px;color:var(--accent)}
+  .menu-item{display:block;width:100%;text-align:left;border:none;background:none;padding:11px 18px;
+    font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-item:hover{background:#f4f6f8}
+  .menu-item.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-item{text-decoration:none}
+  .menu-parent{display:flex;align-items:center;gap:7px;width:100%;text-align:left;border:none;background:none;
+    padding:11px 18px;font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-parent:hover{background:#f4f6f8}
+  .menu-parent.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-parent{text-decoration:none}
+  .menu-arrow{font-size:10px;line-height:1;flex:none;opacity:.7;transition:transform .15s}
+  .menu-parent.collapsed .menu-arrow{transform:rotate(-90deg)}
+  .menu-children{display:block}
+  .menu-children.collapsed{display:none}
+  .menu-child{padding-left:38px;font-size:13px}
+  .main{flex:1;min-width:0}
+  @media (max-width:700px){
+    .layout{flex-direction:column}
+    .side{width:100%;display:flex;align-items:center;flex-wrap:wrap;padding:8px 12px}
+    .side .logo{padding:0 12px 0 0;margin:0}
+    .menu-item,.menu-parent{display:inline-block;width:auto;border-left:none;border-bottom:3px solid transparent;padding:8px 12px}
+    .menu-item.active,.menu-parent.active{border-left:none;border-bottom-color:var(--accent)}
+    .menu-children{display:inline-block}
+  }
+
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+  header{padding:8px 0 18px}
+  h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--muted);font-size:13px;margin:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);padding:18px}
+  .alert{padding:12px 14px;border-radius:10px;font-size:14px;margin-top:14px;display:none}
+  .alert.err{background:#fdecec;color:#a22;border:1px solid #f3c6c6;display:block}
+  footer{margin-top:24px;color:var(--muted);font-size:12px;text-align:center}
+  footer a{color:var(--accent);text-decoration:none}
+
+  /* ===== 统计页 ===== */
+  .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}
+  .stat-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fafbfc}
+  .stat-label{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+  .stat-dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .stat-num{font-size:28px;font-weight:700;line-height:1.25;margin-top:4px}
+  .stat-note{font-size:12px;color:var(--muted);margin-top:2px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--ink);margin-bottom:10px}
+  .legend-item{display:inline-flex;align-items:center;gap:7px}
+  .legend-item i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .chart-box{width:100%;min-height:300px}
+  .chart-box svg{width:100%;height:auto;display:block}
+  .empty{color:var(--muted);font-size:14px;text-align:center;padding:42px 12px}
+  .axis-text{fill:var(--muted);font-size:11px}
+  .bar-total{fill:var(--ink);font-size:11px;font-weight:600;text-anchor:middle}
+  .bar-seg-text{fill:#fff;font-size:11px;font-weight:600;text-anchor:middle;pointer-events:none}
+  .grid-line{stroke:var(--line);stroke-width:1}
+  @media (max-width:640px){
+    .summary{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <div class="logo">img-sieve</div>
+
+    <div class="menu-parent" id="groupPeople" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">人脉识别</span>
+    </div>
+    <div class="menu-children" id="childrenPeople">
+      <a class="menu-item menu-child" href="/?tab=sync">同步识别</a>
+      <a class="menu-item menu-child" href="/?tab=async">异步识别</a>
+    </div>
+
+    <div class="menu-parent" id="groupOrder" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">订单识别</span>
+    </div>
+    <div class="menu-children" id="childrenOrder">
+      <a class="menu-item menu-child" href="/order?tab=sync">同步识别</a>
+      <a class="menu-item menu-child" href="/order?tab=async">异步识别</a>
+    </div>
+
+    <div class="menu-parent active" id="groupRecord" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">任务记录</span>
+    </div>
+    <div class="menu-children" id="childrenRecord">
+      <a class="menu-item menu-child" href="/?tab=data">任务记录</a>
+      <a class="menu-item menu-child active" href="/stats">统计</a>
+    </div>
+  </aside>
+  <main class="main">
+  <div class="wrap">
+    <header>
+      <h1>识别统计</h1>
+      <p class="sub">近 7 天按日汇总人脉识别与订单识别任务量，不同场景以颜色区分；统计口径为区间内全部任务记录（同步与异步均计入）。</p>
+    </header>
+
+    <section class="card">
+      <div class="summary" id="summary"></div>
+      <div class="legend" id="legend"></div>
+      <div class="chart-box" id="chartBox"></div>
+      <div class="empty" id="empty" style="display:none">近 7 天暂无识别记录。</div>
+      <div class="alert err" id="alert"></div>
+    </section>
+
+    <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · <a href="/">人脉识别</a> · <a href="/order">订单识别</a> · <a href="/?tab=data">任务记录</a></footer>
+  </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------- 父菜单折叠 / 展开 ---------- */
+  [
+    ['groupPeople', 'childrenPeople'],
+    ['groupOrder', 'childrenOrder'],
+    ['groupRecord', 'childrenRecord'],
+  ].forEach(function(pair){
+    var group=document.getElementById(pair[0]),
+        children=document.getElementById(pair[1]);
+    group.addEventListener('click', function(){
+      children.classList.toggle('collapsed');
+      group.classList.toggle('collapsed');
+    });
+  });
+
+  var alertEl=document.getElementById('alert'),
+      emptyEl=document.getElementById('empty'),
+      summaryEl=document.getElementById('summary'),
+      legendEl=document.getElementById('legend'),
+      chartBox=document.getElementById('chartBox');
+
+  function showError(msg){
+    alertEl.textContent=msg;
+    alertEl.style.display='block';
+    emptyEl.style.display='none';
+    summaryEl.innerHTML='';
+    legendEl.innerHTML='';
+    chartBox.innerHTML='';
+  }
+
+  function shortDate(s){
+    var p=(s||'').split('-');
+    return p.length===3 ? p[1]+'-'+p[2] : s;
+  }
+
+  function niceMax(v){
+    if(v<=1) return 1;
+    var p=Math.pow(10, Math.floor(Math.log10(v)));
+    var n=v/p;
+    var s = n<=1 ? 1 : n<=2 ? 2 : n<=2.5 ? 2.5 : n<=5 ? 5 : 10;
+    return Math.ceil(s*p);
+  }
+
+  function statCard(meta, total, note){
+    var color = meta.color || '#1c2733';
+    return '<div class="stat-card">' +
+      '<div class="stat-label"><span class="stat-dot" style="background:'+color+'"></span>'+meta.label+'</div>' +
+      '<div class="stat-num" style="color:'+color+'">'+total+'</div>' +
+      '<div class="stat-note">'+note+'</div></div>';
+  }
+
+  function render(data){
+    var totals=data.totals || {};
+    alertEl.style.display='none';
+    summaryEl.innerHTML =
+      statCard(data.series[0] || {label:'人脉识别', color:'#0e9f8a'}, totals.people || 0, '近 7 天累计') +
+      statCard(data.series[1] || {label:'订单识别', color:'#f59e0b'}, totals.order || 0, '近 7 天累计') +
+      '<div class="stat-card"><div class="stat-label"><span class="stat-dot" style="background:#1c2733"></span>合计</div>' +
+      '<div class="stat-num">'+(totals.total || 0)+'</div>' +
+      '<div class="stat-note">人脉 + 订单</div></div>';
+
+    legendEl.innerHTML = data.series.map(function(s){
+      return '<span class="legend-item"><i style="background:'+s.color+'"></i>'+s.label+'</span>';
+    }).join('');
+
+    var daily=data.dates.map(function(_,i){
+      return data.series.reduce(function(a,s){ return a + (s.values[i] || 0); }, 0);
+    });
+
+    if((totals.total || 0) === 0){
+      emptyEl.style.display='block';
+      chartBox.innerHTML='';
+      return;
+    }
+    emptyEl.style.display='none';
+
+    var W=900, H=340, L=48, R=18, T=18, B=42;
+    var pw=W-L-R, ph=H-T-B;
+    var n=data.dates.length;
+    var band=pw/n;
+    var barW=Math.min(36, band*0.55);
+    var yMax=niceMax(Math.max(1, Math.max.apply(null, daily)));
+    function yPos(v){ return T + ph - (v/yMax)*ph; }
+
+    var parts=[];
+    /* 横向网格与 Y 轴刻度 */
+    for(var g=0; g<=4; g++){
+      var val=yMax*g/4, yy=yPos(val);
+      parts.push('<line class="grid-line" x1="'+L+'" y1="'+yy+'" x2="'+(W-R)+'" y2="'+yy+'"/>');
+      var label=Math.abs(val - Math.round(val)) < 0.01 ? String(Math.round(val)) : val.toFixed(1);
+      parts.push('<text class="axis-text" x="'+(L-8)+'" y="'+(yy+4)+'" text-anchor="end">'+label+'</text>');
+    }
+
+    data.dates.forEach(function(day, i){
+      var center=L+band*i+band/2;
+      var x=L+band*i+(band-barW)/2;
+      var breakdown=data.series.map(function(s){ return s.label+' '+(s.values[i]||0); }).join('，');
+      parts.push('<g><title>'+day+' · '+breakdown+'</title>');
+
+      var bottom=0;
+      data.series.forEach(function(s){
+        var v=s.values[i] || 0;
+        if(v>0){
+          var h=(v/yMax)*ph;
+          var yTop=yPos(bottom+v);
+          parts.push('<rect x="'+x.toFixed(2)+'" y="'+yTop.toFixed(2)+'" width="'+barW.toFixed(2)+'" height="'+h.toFixed(2)+'" fill="'+s.color+'"/>');
+          if(h>=15){
+            parts.push('<text class="bar-seg-text" x="'+(x+barW/2).toFixed(2)+'" y="'+(yTop+h/2+4).toFixed(2)+'">'+v+'</text>');
+          }
+        }
+        bottom += v;
+      });
+
+      if(daily[i] > 0){
+        parts.push('<text class="bar-total" x="'+center.toFixed(2)+'" y="'+(yPos(daily[i])-7).toFixed(2)+'">'+daily[i]+'</text>');
+      }
+      parts.push('<text class="axis-text" x="'+center.toFixed(2)+'" y="'+(H-16)+'" text-anchor="middle">'+shortDate(day)+'</text>');
+      parts.push('</g>');
+    });
+
+    chartBox.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="近 7 天各场景识别数量柱状图">'+parts.join('')+'</svg>';
+  }
+
+  fetch('/admin/stats?days=7')
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res || res.code !== 0){
+        showError((res && res.message) || '统计数据加载失败，请检查 MySQL 连接。');
+        return;
+      }
+      render(res);
+    })
+    .catch(function(){
+      showError('统计数据加载失败，请检查 MySQL 连接后刷新页面。');
+    });
+})();
+</script>
+</body>
+</html>
