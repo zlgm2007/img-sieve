@@ -1,13 +1,18 @@
-# img-sieve — 抖音 / 小红书 截图信息提取服务
+# img-sieve — 抖音 / 小红书 / 微信 人脉识别 + 电商订单号识别服务
 
-**上传「用户主页」+「消息对话框」两张截图，自动提取昵称、抖音号 / 小红书号、手机号，并核对两处昵称是否一致，输出结构化 JSON。**
+两条独立业务线，共享同一套 RapidOCR 本地离线引擎：
+
+- **人脉识别**：上传「主页 / 联系人」+「消息对话框」两张截图，自动提取昵称、抖音号 / 小红书号 / 微信号、地区、手机号，并核对两处昵称是否一致。
+- **订单识别**：上传一张订单列表页截图，抽取页面上全部订单号，按阅读顺序返回订单号列表。
 
 本地部署、**纯内网离线运行、图片不出内网**，不依赖任何云端 OCR。
 
 ## 核心亮点
 
-- **支持抖音 + 小红书**：一套 RapidOCR（PP-OCR v4）自动区分平台，无需分别部署
-- **中文识别准**：RapidOCR 内置 ONNX 模型，昵称 / 账号 / 手机号实测准确
+- **支持抖音 + 小红书 + 微信**：一套 RapidOCR（PP-OCR v4）自动区分平台与场景，无需分别部署
+- **订单号批量抽取**：单张订单列表页可识别多个订单号，前缀锚定，商品编码 / SKU / 水印不混入
+- **中文识别准**：RapidOCR 内置 ONNX 模型，昵称 / 账号 / 手机号 / 订单号实测准确
+- **同步 + 异步**：同步阻塞接口；配 MySQL 后支持任务队列、后台 worker 识别、多机共享
 - **零联网**：运行时全程无网络请求，适合纯内网
 - **开箱即用**：自包含 Linux 运行时，服务器无需安装 Python
 
@@ -19,39 +24,36 @@
 ./run.sh --host 0.0.0.0 --port 8080   # 启动服务
 ```
 
-浏览器打开 `http://<服务地址>:8080/`，上传 **主页截图 + 对话框截图** 两张图，点「开始识别」，
+浏览器打开两个独立页面（左侧菜单可互相跳转）：
 
-页面即展示昵称、抖音号 / 小红书号、手机号，以及昵称是否一致。
+| 页面 | 地址 | 上传内容 |
+| --- | --- | --- |
+| **人脉识别** | `http://<服务地址>:8080/` | 主页 / 联系人截图 + 对话框截图两张图 |
+| **订单识别** | `http://<服务地址>:8080/order` | 一张订单列表页截图 |
 
-| 抖音     | 小红书     |
-| ------ | ------- |
-| 抖音识别界面 | 小红书识别界面 |
+人脉页展示昵称、抖音号 / 小红书号 / 微信号、地区、手机号，以及两处昵称是否一致；订单页展示识别到的订单号总数与编号订单号列表。
 
-- 左：识别「叫我大猫 /jiaowodamao996 / 手机号」，昵称一致 ✅
-- 右：识别「滴滴嗒哒 / 小红书号 / 手机号」，昵称不一致（滴滴嗒哒 ≠ 一休的馒头）
+- 人脉样例：抖音「叫我大猫 / jiaowodamao996 / 手机号」昵称一致 ✅；小红书「滴滴嗒哒 / 小红书号」与对话框「予行记」昵称不一致。
+- 订单样例：一张列表页识别出 4 个订单号，按页面顺序展示。
 
-> 网页为单文件自包含（内联样式与脚本，无外部资源）。接口：  
-> `GET /`
->
-> 网页界面・
->
-> `POST /recognize`
->
-> 上传 2 图返回 JSON・
->
-> `GET /health`
->
-> 健康检查
+> 网页为单文件自包含（内联样式与脚本，无外部资源）。主要接口：  
+> `GET /` 人脉识别网页・`GET /order` 订单识别网页・`POST /recognize` 人脉同步・`POST /recognize/async` 人脉异步・`POST /recognize-order` 订单同步・`POST /recognize-order/async` 订单异步・`GET /task/{task_id}` 任务查询・`GET /health` 健康检查
 
 ---
 
 ## 本地 CLI
 
 ```
-# 主页图 + 对话框图，自动识别角色与平台
+# 人脉识别（默认 people）：主页/联系人图 + 对话框图，自动识别角色与平台
 ./.venv_test/bin/python cli.py raw/20261015135527202.jpg raw/20261015135547661.jpg
 
-# 指定后端 / 显式指定角色
+# 微信联系人页 + 对话框
+./.venv_test/bin/python cli.py raw/wx20261022094534150.jpg raw/wx20261022094522060.jpg
+
+# 订单识别（order）：单张订单列表页
+./.venv_test/bin/python cli.py --mode order raw/order20261022094541207.jpg
+
+# 指定后端 / 显式指定角色（仅人脉模式）
 python3 cli.py <主页图> <对话框图> --backend rapidocr|vision|tesseract|mock
 python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话框图>=chat
 ```
@@ -59,6 +61,8 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 ---
 
 ## 识别结果（样例）
+
+**人脉识别 —— 抖音：**
 
 ```
 {
@@ -70,7 +74,9 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
       "nickname": "叫我大猫",
       "platform": "douyin",
       "douyin_id": "jiaowodamao996",
-      "xiaohongshu_id": null
+      "xiaohongshu_id": null,
+      "wechat_id": null,
+      "region": null
     },
     "phone": "18*********",
     "chat_object_name": "叫我大猫",
@@ -83,35 +89,55 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 }
 ```
 
-> `data.nickname_consistent`
+**人脉识别 —— 微信：**
+
+```
+{
+  "code": 0,
+  "message": "ok",
+  "backend": "rapidocr",
+  "data": {
+    "user": {
+      "nickname": "王云13951905083",
+      "platform": "wechat",
+      "douyin_id": null,
+      "xiaohongshu_id": null,
+      "wechat_id": "Z071216xy",
+      "region": "江苏南京"
+    },
+    "phone": null,
+    "chat_object_name": "王云13951905083",
+    "nickname_consistent": true,
+    "nickname_check": {
+      "user": "王云13951905083", "chat": "王云13951905083",
+      "compare_chars": 5, "consistent": true
+    }
+  }
+}
+```
+
+**订单识别：**
+
+```
+{
+  "code": 0,
+  "message": "ok",
+  "backend": "rapidocr",
+  "data": {
+    "order_count": 4,
+    "order_ids": [
+      "210100027596213478",
+      "210100027600353478",
+      "210100027598393478",
+      "210100027600333478"
+    ]
+  }
+}
+```
+
+> 人脉：`data.nickname_consistent` 为主页昵称与对话框对象昵称是否一致（`true/false/null`），等价于 `data.nickname_check.consistent`；按前 **5 位前缀匹配**，容忍昵称过长被截断。平台账号按 `user.platform` 落到对应字段：抖音 `douyin_id`、小红书 `xiaohongshu_id`、微信 `wechat_id` + `region`。
 >
-> ：主页昵称与对话框对象昵称是否一致（
->
-> `true/false/null`
->
-> ），  
-> 等价于
->
-> `data.nickname_check.consistent`
->
-> ；按前
->
-> **5 位前缀匹配**
->
-> ，容忍昵称过长被截断。  
-> 小红书平台：
->
-> `user.platform`
->
-> 为
->
-> `xiaohongshu`
->
-> ，账号存于
->
-> `user.xiaohongshu_id`
->
-> 。
+> 订单：`data.order_count` 为订单号数量，`data.order_ids` 为按页面阅读顺序排列、去重后的订单号列表；未识别到时 `order_count=0`、`order_ids=[]`。
 
 ---
 
@@ -129,7 +155,7 @@ python3 cli.py <主页图> <对话框图> --role <主页图>=user --role <对话
 
 ## 异步识别 / 多机部署（MySQL 持久化）
 
-单台机器跑同步识别用不上 MySQL；要做异步识别（先返回 taskId、后台识别再查询结果）和多机共享任务时，才需要 MySQL。
+单台机器跑同步识别用不上 MySQL；要做异步识别（先返回 taskId、后台识别再查询结果）和多机共享任务时，才需要 MySQL。人脉识别（`/recognize/async`）与订单识别（`/recognize-order/async`）共用同一张任务表，任务带 `scene` 字段（`people` / `order`），worker 按场景自动分流到对应识别流水线。
 
 拓扑：MySQL 只装在一台机器（下称机器 A，如 `10.237.179.21`），机器 A 和其它机器（B、C…）都同时跑 HTTP + worker，连同一个库。
 
@@ -239,4 +265,4 @@ crontab -e
 ## 附录
 
 - 核心技术细节（OCR 后端、提取规则、项目结构、Python 版本、部署细节、服务进程管理、测试）：**[doc/technical.md](doc/technical.md)**
-- HTTP 接口对接（/recognize 入参、出参、错误码）：**[doc/http-api.md](doc/http-api.md)**
+- HTTP 接口对接（/recognize、/recognize-order 入参、出参、错误码、异步任务）：**[doc/http-api.md](doc/http-api.md)**

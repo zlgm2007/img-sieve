@@ -1,4 +1,5 @@
-"""字段提取规则：从 OCR 结果中提取 用户昵称 / 抖音号 / 手机号码。
+"""字段提取规则：从 OCR 结果中提取 用户昵称 / 抖音号 / 小红书号 / 微信号 / 地区 / 手机号码，
+以及订单列表页的订单号列表。
 
 输入为 ocr.run_ocr 返回的规范化结果：
 [
@@ -24,18 +25,33 @@ PLATFORM_DECLS = {
         re.compile(r"小红书号\s*[:：]\s*([A-Za-z0-9_\-]+)?", re.IGNORECASE),
         "xiaohongshu_id",
     ),
+    "wechat": (
+        re.compile(r"微信号\s*[:：]\s*([A-Za-z0-9_\-]+)", re.IGNORECASE),
+        re.compile(r"微信号\s*[:：]\s*([A-Za-z0-9_\-]+)?", re.IGNORECASE),
+        "wechat_id",
+    ),
 }
 
 # 平台标签关键字 → 平台
 PLATFORM_LABEL = {
     "抖音号": "douyin",
     "小红书号": "xiaohongshu",
+    "微信号": "wechat",
 }
+
+# 微信「地区」声明行（仅微信联系人页）
+REGION_RE = re.compile(r"地区\s*[:：]\s*(.+)")
+
+# 订单号声明行（订单列表页，一张图可能有多条）
+ORDER_ID_RE = re.compile(r"订单号\s*[:：]\s*(\d{10,})")
 
 # 顶部状态栏 / 导航等干扰文本（不当作昵称）
 _NOISE = {
     "添加好友", "新访客", "搜索", "菜单", "编辑主页", "创建AI形象",
     "首页", "消息", "我", "作品", "日常", "推荐", "收藏", "喜欢",
+    # 微信联系人页导航 / 按钮
+    "朋友资料", "权限", "仅聊天", "朋友圈", "发消息", "音视频通话",
+    "备注", "标签",
 }
 
 # 聊天窗口横幅 / 提示（不当作对象昵称）
@@ -51,31 +67,47 @@ def _norm_text(t: str) -> str:
 
 
 def detect_platform(obs):
-    """根据截图文本判断平台：douyin / xiaohongshu / None。"""
+    """根据截图文本判断平台：douyin / xiaohongshu / wechat / None。
+
+    微信联系人页可能只露出「地区」行而无微信号声明，也据此判为 wechat。
+    """
     for o in obs:
         t = o.get("text", "")
         for label, platform in PLATFORM_LABEL.items():
             if label in t:
                 return platform
+        if REGION_RE.search(t):
+            return "wechat"
+    return None
+
+
+def _extract_region(obs):
+    """从微信联系人页提取地区文本（『地区：江苏 南京』），未识别到返回 None。"""
+    for o in obs:
+        m = REGION_RE.search(o["text"])
+        if m:
+            region = re.sub(r"\s+", " ", m.group(1).strip())
+            if region:
+                return region
     return None
 
 
 def extract_user_info(obs):
-    """从个人主页截图提取昵称与账号。
+    """从个人主页 / 联系人页截图提取昵称与账号信息。
 
-    兼容抖音（抖音号: xxx）与小红书（小红书号: xxx）主页。
-    昵称定位共用『账号行正上方居中文本』的启发式。
+    兼容抖音（抖音号: xxx）、小红书（小红书号: xxx）、微信（微信号: xxx + 地区）。
+    昵称定位共用『账号行正上方一行文本』的启发式。
 
     obs: 单张图片的 observations 列表（含 text / box）。
-    返回 {"nickname": str|None, "platform": str|None,
-          "douyin_id": str|None, "xiaohongshu_id": str|None}
+    返回 {"nickname", "platform", "douyin_id", "xiaohongshu_id",
+          "wechat_id", "region} 字段，未识别到为 None。
     """
     platform = detect_platform(obs)
     id_obs = None
     id_val = None
     id_key = None
 
-    if platform is not None:
+    if platform is not None and platform in PLATFORM_DECLS:
         decl_re, decl_any_re, id_key = PLATFORM_DECLS[platform]
         label = next(k for k, p in PLATFORM_LABEL.items() if p == platform)
         for o in obs:
@@ -95,9 +127,12 @@ def extract_user_info(obs):
 
     nickname = _extract_nickname(obs, id_obs)
     result = {"nickname": nickname, "platform": platform,
-              "douyin_id": None, "xiaohongshu_id": None}
+              "douyin_id": None, "xiaohongshu_id": None,
+              "wechat_id": None, "region": None}
     if id_key is not None:
         result[id_key] = id_val
+    if platform == "wechat":
+        result["region"] = _extract_region(obs)
     return result
 
 
@@ -152,8 +187,12 @@ def _extract_nickname(obs, douyin_obs):
     return None
 
 
+# 对话框顶部标题/状态栏纵向区间（千分比）：标题里内嵌的手机号不属于消息手机号
+_PHONE_BAND_Y1 = 220
+
+
 def extract_phone(obs):
-    """从聊天对话框截图提取手机号码。
+    """从聊天对话框截图提取手机号码（仅消息体，排除顶部标题带）。
 
     数字可能被空格/符号拆开（如 "186 520 50 583 测试"），
     因此按行合并后去除非数字再匹配 11 位大陆手机号。
@@ -162,6 +201,8 @@ def extract_phone(obs):
     # 按行聚合（同一 y 带）
     rows = _group_rows(obs)
     for row in rows:
+        if min(o["box"]["y1"] for o in row) < _PHONE_BAND_Y1:
+            continue  # 顶部标题 / 状态栏，不是消息体
         line = "".join(o["text"] for o in row)
         digits = re.sub(r"\D", "", line)
         if MOBILE_RE.fullmatch(digits):
@@ -169,6 +210,8 @@ def extract_phone(obs):
 
     # 兜底：逐条观察文本内找完整手机号
     for o in obs:
+        if o["box"]["y1"] < _PHONE_BAND_Y1:
+            continue
         for token in re.findall(r"[0-9][0-9\s\-]{9,}", o["text"]):
             digits = re.sub(r"\D", "", token)
             if MOBILE_RE.fullmatch(digits):
@@ -197,31 +240,42 @@ def _group_rows(obs, tol=40):
 
 
 def detect_roles(results):
-    """自动判断两张图各自角色：user(主页) / chat(对话框)。
+    """自动判断两张图各自角色：user(主页/联系人) / chat(对话框)。
 
-    含『抖音号』的 → user；含 11 位大陆手机号的 → chat。
+    含账号声明（抖音号/小红书号/微信号）或地区声明的 → user；
+    含 11 位大陆手机号的 → chat；
+    其余图片若顶部存在居中标题（微信对话框，消息体里不带手机号）→ chat。
     返回 {path: "user"|"chat"}。
     """
     roles = {}
     for r in results:
         text_all = "".join(o["text"] for o in r["observations"])
-        if any(label in text_all for label in PLATFORM_LABEL):
+        if any(label in text_all for label in PLATFORM_LABEL) or REGION_RE.search(text_all):
             roles[r["path"]] = "user"
+            continue
         phone = extract_phone(r["observations"])["phone"]
         if phone:
+            roles[r["path"]] = "chat"
+            continue
+        # 微信对话框兜底：顶部带存在居中标题候选
+        if extract_chat_object_name(r["observations"]):
             roles[r["path"]] = "chat"
     return roles
 
 
 def _clean_name(t):
-    """去掉昵称前导符号（如聊天头像图标被误读的 √/✓ 等）。"""
-    return re.sub(r"^[^\w\u4e00-\u9fff]+", "", t or "").strip()
+    """清洗聊天标题昵称：去掉前导符号；中文昵称尾部图标常被误识为孤立字母（Q/D 等），一并剥除。"""
+    t = re.sub(r"^[^\w\u4e00-\u9fff]+", "", t or "").strip()
+    if re.search(r"[\u4e00-\u9fff]", t):
+        t = re.sub(r"[A-Za-z✓√◆●◇•]{1,2}$", "", t).strip()
+    return t
 
 
 def extract_chat_object_name(obs):
     """从聊天对话框截图提取『对象昵称』。
 
-    对象昵称位于屏幕顶部状态栏下方、消息列表上方，为居中的短文本。
+    对象昵称位于屏幕顶部状态栏下方、消息列表上方，为居中的短文本
+    （微信昵称可内嵌手机号，长度上限放宽到 20）。
     通过 顶部带 + 排除横幅/状态/纯数字 过滤后，取最靠上的一条。
     返回 str | None。
     """
@@ -241,7 +295,7 @@ def extract_chat_object_name(obs):
         # 排除状态栏/纯数字/符号
         if re.fullmatch(r"[\dA-Za-z./:%@\s]+", t):
             continue
-        if len(t) < 2 or len(t) > 15:
+        if len(t) < 2 or len(t) > 20:
             continue
         # 排除系统横幅 / 长句
         if any(k in t for k in _BANNER_NOISE):
@@ -277,11 +331,12 @@ def compare_nicknames(user_nickname, chat_object_name, n=NICKNAME_COMPARE_CHARS)
 
 
 def build_result(results, explicit_roles=None):
-    """组装最终 JSON 数据。
+    """组装「人脉识别」最终 JSON 数据（抖音 / 小红书 / 微信共用）。
 
     explicit_roles: {path: "user"|"chat"}，可选，用于人工指定角色。
     返回 {
-        "user": {"nickname":..., "douyin_id":...},
+        "user": {"nickname", "platform", "douyin_id", "xiaohongshu_id",
+                 "wechat_id", "region"},
         "phone": "18*********",
         "chat_object_name": "多金***",
         "nickname_check": {
@@ -297,7 +352,8 @@ def build_result(results, explicit_roles=None):
         roles.setdefault(path, role)
 
     user = {"nickname": None, "platform": None,
-            "douyin_id": None, "xiaohongshu_id": None}
+            "douyin_id": None, "xiaohongshu_id": None,
+            "wechat_id": None, "region": None}
     phone = None
     raw = None
     chat_object_name = None
@@ -308,7 +364,8 @@ def build_result(results, explicit_roles=None):
             u = extract_user_info(r["observations"])
             user = {"nickname": u["nickname"], "platform": u["platform"],
                     "douyin_id": u["douyin_id"],
-                    "xiaohongshu_id": u["xiaohongshu_id"]}
+                    "xiaohongshu_id": u["xiaohongshu_id"],
+                    "wechat_id": u["wechat_id"], "region": u["region"]}
         elif role == "chat":
             p = extract_phone(r["observations"])
             phone = p["phone"]
@@ -330,3 +387,49 @@ def build_result(results, explicit_roles=None):
         },
     }
     return data
+
+
+def extract_order_ids(obs):
+    """从单张订单列表页抽取全部订单号。
+
+    先按单条观察匹配（多数情况整行在一条观察内）；未命中再按行合并匹配，
+    兜底标签与数字被 OCR 拆成两条观察的情况。
+    返回按页面从上到下排序、去重后的订单号列表。
+    """
+    found = []
+    seen = set()
+
+    def _push(val, box):
+        if val and val not in seen:
+            seen.add(val)
+            found.append((val, box["y1"]))
+
+    # 1) 逐观察匹配
+    for o in obs:
+        m = ORDER_ID_RE.search(o["text"])
+        if m:
+            _push(m.group(1), o["box"])
+
+    # 2) 按行合并兜底
+    if not found:
+        for row in _group_rows(obs):
+            line = "".join(o["text"] for o in row)
+            m = ORDER_ID_RE.search(line)
+            if m:
+                y1 = min(o["box"]["y1"] for o in row)
+                _push(m.group(1), {"y1": y1})
+
+    found.sort(key=lambda x: x[1])
+    return [val for val, _ in found]
+
+
+def build_order_result(results):
+    """组装「订单识别」最终 JSON 数据：跨图合并去重，按阅读顺序返回订单号列表。"""
+    order_ids = []
+    seen = set()
+    for r in results:
+        for oid in extract_order_ids(r["observations"]):
+            if oid not in seen:
+                seen.add(oid)
+                order_ids.append(oid)
+    return {"order_count": len(order_ids), "order_ids": order_ids}

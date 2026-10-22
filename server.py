@@ -2,16 +2,16 @@
 """HTTP 上传识别服务（仅 Python 标准库，内网离线可部署）。
 
 功能：
-- GET  /            上传+展示识别结果的网页（web/ui.html）
-- POST /recognize   上传 2 张抖音截图（multipart/form-data），返回识别 JSON
-- GET  /health      健康检查
+- GET  /               人脉识别网页（抖音 / 小红书 / 微信，web/ui.html）
+- GET  /order          订单识别网页（web/order.html）
+- POST /recognize      人脉识别：上传主页(联系人) + 对话框截图，返回识别 JSON
+- POST /recognize/async  人脉识别异步任务（MySQL 队列）
+- POST /recognize-order    订单识别：上传 1 张订单列表页，返回订单号列表
+- POST /recognize-order/async  订单识别异步任务（MySQL 队列）
+- GET  /health        健康检查
 
 用法:
     python3 server.py --host 0.0.0.0 --port 8080 [--backend rapidocr|vision|tesseract|mock]
-
-接口:
-    POST /recognize   body: multipart/form-data，字段为图片文件（2 张），
-                      可选字段 role=<fieldname>:user|chat 指定某字段的角色。
 """
 from __future__ import annotations
 
@@ -28,10 +28,11 @@ from urllib.parse import urlparse
 
 from img_sieve import db, ocr
 from img_sieve.extractor import detect_roles
-from img_sieve.service import recognize
+from img_sieve.service import recognize, recognize_order
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 UI_PATH = os.path.join(_BASE, "web", "ui.html")
+ORDER_UI_PATH = os.path.join(_BASE, "web", "order.html")
 
 MAX_BODY = 50 * 1024 * 1024  # 50MB 上限
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
@@ -88,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"code": 0, "message": "ok", "status": "up"})
         elif path in ("/", ""):
             self._serve_ui()
+        elif path == "/order":
+            self._serve_order_ui()
         elif path.startswith("/task/"):
             rest = path[len("/task/"):].strip("/")
             parts = rest.split("/")
@@ -109,8 +112,20 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send_text(
                 "img-sieve 图片信息识别服务\n\n"
-                "POST /recognize  上传 2 张抖音截图（multipart），返回 JSON\n"
-                "GET /health      健康检查\n"
+                "POST /recognize          人脉识别（主页/联系人 + 对话框），返回 JSON\n"
+                "POST /recognize-order    订单识别（1 张订单列表页），返回订单号列表\n"
+                "GET  /health             健康检查\n"
+            )
+
+    def _serve_order_ui(self):
+        try:
+            with open(ORDER_UI_PATH, "r", encoding="utf-8") as f:
+                self._send_html(f.read())
+        except OSError:
+            self._send_text(
+                "img-sieve 订单识别服务\n\n"
+                "POST /recognize-order  上传 1 张订单列表页（multipart），返回订单号 JSON\n"
+                "GET /health            健康检查\n"
             )
 
     def do_POST(self):
@@ -119,6 +134,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_recognize()
         elif path == "/recognize/async":
             self._handle_recognize_async()
+        elif path == "/recognize-order":
+            self._handle_recognize_order()
+        elif path == "/recognize-order/async":
+            self._handle_recognize_order_async()
         elif path == "/admin/purge":
             self._handle_admin_purge()
         else:
@@ -184,7 +203,8 @@ class Handler(BaseHTTPRequestHandler):
                 n2 = files[1][0] if len(files) > 1 else None
                 db.record_sync_task(b1, n1, b2, n2,
                                     json.dumps(result, ensure_ascii=False),
-                                    self.backend or result.get("backend"))
+                                    self.backend or result.get("backend"),
+                                    scene="people")
             except Exception as e:
                 self._log(f"/recognize 写任务记录失败（忽略）: {e}")
             self._send_json(result)
@@ -231,6 +251,99 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"code": 0, "message": "ok",
                          "task_id": task_id, "status": "pending"})
 
+    # ---------- 订单识别（同步） ----------
+    def _handle_recognize_order(self):
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            self._send_json({"code": 400,
+                             "message": "请使用 multipart/form-data 上传图片"}, 400)
+            return
+
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0 or length > MAX_BODY:
+            self._send_json({"code": 400,
+                             "message": f"请求体大小需在 1~{MAX_BODY} 字节之间"}, 400)
+            return
+
+        try:
+            files, _roles = self._parse_multipart(content_type, length)
+        except ValueError as e:
+            self._send_json({"code": 400, "message": str(e)}, 400)
+            return
+
+        if len(files) != 1:
+            self._send_json({"code": 400,
+                             "message": "订单识别仅支持上传 1 张订单列表页截图"}, 400)
+            return
+
+        fname, data = files[0]
+        fd, tmp = tempfile.mkstemp(suffix=os.path.splitext(fname)[1] or ".jpg")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+
+            t0 = time.perf_counter()
+            try:
+                result = recognize_order([tmp], backend=self.backend)
+            except ocr.OCRBackendError as e:
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._log(f"/recognize-order 识别失败, 耗时 {elapsed_ms:.1f} ms, 原因={e}")
+                self._send_json({"code": 500, "message": str(e)}, 500)
+                return
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            self._log(f"/recognize-order 识别成功, 耗时 {elapsed_ms:.1f} ms, "
+                      f"订单号={result['data']['order_count']} 个, "
+                      f"backend={self.backend or 'auto'}")
+            # 同步识别也写入 ocr_task，让任务记录页能查到（失败不影响主流程）
+            try:
+                db.record_sync_task(data, fname, None, None,
+                                    json.dumps(result, ensure_ascii=False),
+                                    self.backend or result.get("backend"),
+                                    scene="order")
+            except Exception as e:
+                self._log(f"/recognize-order 写任务记录失败（忽略）: {e}")
+            self._send_json(result)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+    # ---------- 订单识别（异步） ----------
+    def _handle_recognize_order_async(self):
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            self._send_json({"code": 400, "message": "请使用 multipart/form-data 上传图片"}, 400)
+            return
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0 or length > MAX_BODY:
+            self._send_json({"code": 400, "message": f"请求体大小需在 1~{MAX_BODY} 字节之间"}, 400)
+            return
+        try:
+            files, _roles = self._parse_multipart(content_type, length)
+        except ValueError as e:
+            self._send_json({"code": 400, "message": str(e)}, 400)
+            return
+
+        if len(files) != 1:
+            self._send_json({"code": 400,
+                             "message": "订单识别仅支持上传 1 张订单列表页截图"}, 400)
+            return
+
+        fname, data = files[0]
+        try:
+            task_id = db.create_task(
+                data, fname or "order.jpg", "image/jpeg",
+                b"", None, "image/jpeg",
+                backend=self.backend, scene="order")
+        except Exception as e:
+            self._log(f"/recognize-order/async 任务入库失败: {e}")
+            self._send_json({"code": 500, "message": f"任务入库失败（检查 MySQL 连接）: {e}"}, 500)
+            return
+        self._log(f"/recognize-order/async 已创建任务 {task_id}")
+        self._send_json({"code": 0, "message": "ok",
+                         "task_id": task_id, "status": "pending"})
+
     def _handle_task_query(self, task_id):
         if not task_id:
             self._send_json({"code": 400, "message": "缺少 task_id"}, 400)
@@ -253,6 +366,7 @@ class Handler(BaseHTTPRequestHandler):
             "code": 0,
             "task_id": task_id,
             "status": row["status"],
+            "scene": row.get("scene") or "people",
             "created_at": str(row["created_at"]),
             "started_at": str(row["started_at"]) if row.get("started_at") else None,
             "finished_at": str(row["finished_at"]) if row.get("finished_at") else None,
@@ -396,10 +510,11 @@ def main(argv=None):
     print(f"[img-sieve] 服务已启动: http://{args.host}:{args.port}")
     print(f"[img-sieve] OCR 后端: {args.backend or ocr.auto_driver([])}")
     if async_ready:
-        print("[img-sieve] 同步: POST /recognize | 异步: POST /recognize/async, "
-              "GET /task/{task_id}, POST /admin/purge?days=N")
+        print("[img-sieve] 人脉: POST /recognize, /recognize/async | "
+              "订单: POST /recognize-order, /recognize-order/async")
+        print("[img-sieve] 查询: GET /task/{task_id} | 运维: POST /admin/purge?days=N")
     else:
-        print("[img-sieve] 同步: POST /recognize | GET /health")
+        print("[img-sieve] 人脉: POST /recognize | 订单: POST /recognize-order | GET /health")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

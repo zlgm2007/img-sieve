@@ -29,6 +29,7 @@ TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS ocr_task (
   task_id      VARCHAR(40)  NOT NULL PRIMARY KEY,
   status       ENUM('pending','processing','done','failed') NOT NULL DEFAULT 'pending',
+  scene        ENUM('people','order') NOT NULL DEFAULT 'people',
   worker_id    VARCHAR(128) NULL,
   created_at   DATETIME     NOT NULL,
   started_at   DATETIME     NULL,
@@ -79,11 +80,23 @@ def connect():
 
 
 def ensure_table():
-    """建表（幂等）。部署时由 install/启动脚本调用一次。"""
+    """建表（幂等）。部署时由 install/启动脚本调用一次。
+
+    老库没有 scene 列时自动补齐（订单识别场景字段），不影响存量任务。
+    """
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(TABLE_SQL)
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ocr_task' "
+                "AND COLUMN_NAME='scene'")
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    "ALTER TABLE ocr_task "
+                    "ADD COLUMN scene ENUM('people','order') NOT NULL "
+                    "DEFAULT 'people' AFTER status")
         conn.commit()
     finally:
         conn.close()
@@ -91,18 +104,21 @@ def ensure_table():
 
 def create_task(image1: bytes, image1_name: str, image1_type: str,
                 image2: bytes, image2_name: str, image2_type: str,
-                backend: str | None = None) -> str:
-    """写入一条 pending 任务并返回 task_id。图片以 BLOB 入库。"""
+                backend: str | None = None, scene: str = "people") -> str:
+    """写入一条 pending 任务并返回 task_id。图片以 BLOB 入库。
+
+    scene: people=人脉识别（主页+对话框）；order=订单识别（订单号列表）。
+    """
     task_id = uuid.uuid4().hex
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO ocr_task "
-                "(task_id, status, created_at, backend, "
+                "(task_id, status, scene, created_at, backend, "
                 " image1, image1_name, image1_type, image2, image2_name, image2_type) "
-                "VALUES (%s,'pending',NOW(3),%s,%s,%s,%s,%s,%s,%s)",
-                (task_id, backend, image1, image1_name, image1_type,
+                "VALUES (%s,'pending',%s,NOW(3),%s,%s,%s,%s,%s,%s,%s)",
+                (task_id, scene, backend, image1, image1_name, image1_type,
                  image2, image2_name, image2_type))
         conn.commit()
         return task_id
@@ -129,7 +145,7 @@ def claim_task(wid: str) -> dict | None:
             return None
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             cur.execute(
-                "SELECT task_id, backend, image1, image1_name, image2, image2_name "
+                "SELECT task_id, backend, scene, image1, image1_name, image2, image2_name "
                 "FROM ocr_task WHERE worker_id=%s AND status='processing' "
                 "ORDER BY started_at DESC LIMIT 1",
                 (wid,))
@@ -188,7 +204,7 @@ def get_task(task_id: str) -> dict | None:
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             cur.execute(
-                "SELECT task_id, status, created_at, started_at, finished_at, "
+                "SELECT task_id, status, scene, created_at, started_at, finished_at, "
                 "backend, result_json, error_msg FROM ocr_task WHERE task_id=%s",
                 (task_id,))
             return cur.fetchone()
@@ -198,7 +214,8 @@ def get_task(task_id: str) -> dict | None:
 
 def record_sync_task(image1: bytes, image1_name: str,
                      image2: bytes | None, image2_name: str | None,
-                     result_json: str, backend: str | None) -> str:
+                     result_json: str, backend: str | None,
+                     scene: str = "people") -> str:
     """同步识别完成后直接写一条 done 记录（让任务记录页能查到同步数据）。"""
     task_id = uuid.uuid4().hex
     conn = connect()
@@ -206,10 +223,10 @@ def record_sync_task(image1: bytes, image1_name: str,
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO ocr_task "
-                "(task_id, status, created_at, finished_at, backend, "
+                "(task_id, status, scene, created_at, finished_at, backend, "
                 " image1, image1_name, image2, image2_name, result_json) "
-                "VALUES (%s,'done',NOW(3),NOW(3),%s,%s,%s,%s,%s,%s)",
-                (task_id, backend, image1, image1_name,
+                "VALUES (%s,'done',%s,NOW(3),NOW(3),%s,%s,%s,%s,%s,%s)",
+                (task_id, scene, backend, image1, image1_name,
                  image2, image2_name, result_json))
         conn.commit()
         return task_id
@@ -252,7 +269,8 @@ def list_tasks(start: str | None = None, end: str | None = None,
             total = cur.fetchone()[0]
         with conn.cursor(pymysql.cursors.DictCursor) as cur:
             cur.execute(
-                "SELECT task_id, status, backend, created_at, finished_at, error_msg "
+                "SELECT task_id, status, scene, backend, created_at, finished_at, error_msg, "
+                "image1_name, image2_name "
                 "FROM ocr_task" + wsql +
                 " ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 params + [per_page, (page - 1) * per_page])

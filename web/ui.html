@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>抖音截图信息识别</title>
+<title>人脉识别 · img-sieve</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32' height='32' rx='7' fill='%230e9f8a'/%3E%3Cpath d='M8 23V9h4.5l6 8.5V9H23v14h-4.5L12.5 14.5V23z' fill='white'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -25,13 +25,27 @@
     font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
   .menu-item:hover{background:#f4f6f8}
   .menu-item.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-item{text-decoration:none}
+  /* 一级菜单 */
+  .menu-parent{display:flex;align-items:center;gap:7px;width:100%;text-align:left;border:none;background:none;
+    padding:11px 18px;font-size:14px;color:var(--ink);cursor:pointer;border-left:3px solid transparent;font-family:inherit}
+  .menu-parent:hover{background:#f4f6f8}
+  .menu-parent.active{color:var(--accent);border-left-color:var(--accent);background:#eefaf8;font-weight:600}
+  a.menu-parent{text-decoration:none}
+  .menu-arrow{font-size:10px;line-height:1;flex:none;opacity:.7;transition:transform .15s}
+  .menu-parent.collapsed .menu-arrow{transform:rotate(-90deg)}
+  /* 二级子菜单 */
+  .menu-children{display:block}
+  .menu-children.collapsed{display:none}
+  .menu-child{padding-left:38px;font-size:13px}
   .main{flex:1;min-width:0}
   @media (max-width:700px){
     .layout{flex-direction:column}
-    .side{width:100%;display:flex;align-items:center;padding:8px 12px}
+    .side{width:100%;display:flex;align-items:center;flex-wrap:wrap;padding:8px 12px}
     .side .logo{padding:0 12px 0 0;margin:0}
-    .menu-item{display:inline-block;width:auto;border-left:none;border-bottom:3px solid transparent;padding:8px 12px}
-    .menu-item.active{border-left:none;border-bottom-color:var(--accent)}
+    .menu-item,.menu-parent{display:inline-block;width:auto;border-left:none;border-bottom:3px solid transparent;padding:8px 12px}
+    .menu-item.active,.menu-parent.active{border-left:none;border-bottom-color:var(--accent)}
+    .menu-children{display:inline-block}
   }
 
   .wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
@@ -115,15 +129,25 @@
 <div class="layout">
   <aside class="side">
     <div class="logo">img-sieve</div>
-    <button class="menu-item active" data-page="sync" type="button">同步识别</button>
-    <button class="menu-item" data-page="async" type="button">异步识别</button>
-    <button class="menu-item" data-page="data" type="button">任务记录</button>
+
+    <div class="menu-parent active" id="groupPeople" role="button" tabindex="0">
+      <span class="menu-arrow">▾</span>
+      <span class="menu-label">人脉识别</span>
+    </div>
+    <div class="menu-children" id="childrenPeople">
+      <button class="menu-item menu-child active" data-page="sync" type="button">同步识别</button>
+      <button class="menu-item menu-child" data-page="async" type="button">异步识别</button>
+    </div>
+
+    <a class="menu-item menu-parent" href="/order">订单识别</a>
+
+    <button class="menu-item menu-parent" data-page="data" type="button">任务记录</button>
   </aside>
   <main class="main">
   <div class="wrap">
     <header>
-      <h1>截图信息识别</h1>
-      <p class="sub">上传主页截图与消息对话框截图，识别用户昵称、抖音号、小红书号与手机号码。图片仅本地处理。</p>
+      <h1>人脉识别</h1>
+      <p class="sub">上传主页/联系人截图与消息对话框截图，识别昵称、抖音号、小红书号、微信号、地区与手机号码，并核对两处昵称是否一致。图片仅本地处理。</p>
     </header>
 
     <!-- ===================== 同步识别（原有功能） ===================== -->
@@ -132,8 +156,8 @@
         <div class="grid">
           <div class="up" id="slotUser">
             <div class="up-head">
-              <span class="up-title">主页截图</span>
-              <span class="up-hint">含「抖音号、小红书号」</span>
+              <span class="up-title">主页 / 联系人截图</span>
+              <span class="up-hint">含「抖音号 / 小红书号 / 微信号 / 地区」</span>
             </div>
             <div class="slot empty" id="dropUser" tabindex="0" role="button" aria-label="选择主页截图">
               <div class="placeholder" id="phUser">
@@ -149,7 +173,7 @@
           <div class="up" id="slotChat">
             <div class="up-head">
               <span class="up-title">对话框截图</span>
-              <span class="up-hint">含手机号码</span>
+              <span class="up-hint">顶部昵称 / 消息体手机号</span>
             </div>
             <div class="slot empty" id="dropChat" tabindex="0" role="button" aria-label="选择对话框截图">
               <div class="placeholder" id="phChat">
@@ -176,9 +200,10 @@
         <div class="check on yes" id="checkBanner"><span class="dot"></span><span id="checkText"></span></div>
         <div class="cards">
           <div class="rcard"><div class="k">用户昵称</div><div class="v" id="vNick">—</div></div>
-          <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="vId">—</div></div>
+          <div class="rcard"><div class="k">账号（抖音号/小红书号/微信号）</div><div class="v" id="vId">—</div></div>
           <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="vObj">—</div></div>
           <div class="rcard"><div class="k">手机号码</div><div class="v" id="vPhone">—</div></div>
+          <div class="rcard"><div class="k">地区（微信）</div><div class="v" id="vRegion">—</div></div>
         </div>
         <div class="raw"><pre id="rawJson"></pre></div>
       </section>
@@ -190,8 +215,8 @@
         <div class="grid">
           <div class="up" id="aSlotUser">
             <div class="up-head">
-              <span class="up-title">主页截图</span>
-              <span class="up-hint">含「抖音号、小红书号」</span>
+              <span class="up-title">主页 / 联系人截图</span>
+              <span class="up-hint">含「抖音号 / 小红书号 / 微信号 / 地区」</span>
             </div>
             <div class="slot empty" id="aDropUser" tabindex="0" role="button" aria-label="选择主页截图">
               <div class="placeholder" id="aPhUser">
@@ -207,7 +232,7 @@
           <div class="up" id="aSlotChat">
             <div class="up-head">
               <span class="up-title">对话框截图</span>
-              <span class="up-hint">含手机号码</span>
+              <span class="up-hint">顶部昵称 / 消息体手机号</span>
             </div>
             <div class="slot empty" id="aDropChat" tabindex="0" role="button" aria-label="选择对话框截图">
               <div class="placeholder" id="aPhChat">
@@ -239,9 +264,10 @@
         <div class="check on unknown" id="aCheckBanner"><span class="dot"></span><span id="aCheckText"></span></div>
         <div class="cards">
           <div class="rcard"><div class="k">用户昵称</div><div class="v" id="aNick">—</div></div>
-          <div class="rcard"><div class="k">账号（抖音号/小红书号）</div><div class="v" id="aId">—</div></div>
+          <div class="rcard"><div class="k">账号（抖音号/小红书号/微信号）</div><div class="v" id="aId">—</div></div>
           <div class="rcard"><div class="k">对话框对象昵称</div><div class="v" id="aObj">—</div></div>
           <div class="rcard"><div class="k">手机号码</div><div class="v" id="aPhone">—</div></div>
+          <div class="rcard"><div class="k">地区（微信）</div><div class="v" id="aRegion">—</div></div>
         </div>
         <div class="raw"><pre id="aRawJson"></pre></div>
       </section>
@@ -267,8 +293,9 @@
             <thead>
               <tr style="text-align:left;color:var(--muted);border-bottom:1px solid var(--line)">
                 <th style="padding:8px 10px">任务ID</th>
-                <th style="padding:8px 10px">主页截图</th>
-                <th style="padding:8px 10px">对话框截图</th>
+                <th style="padding:8px 10px">场景</th>
+                <th style="padding:8px 10px">截图 1</th>
+                <th style="padding:8px 10px">截图 2</th>
                 <th style="padding:8px 10px">状态</th>
                 <th style="padding:8px 10px">后端</th>
                 <th style="padding:8px 10px">创建时间</th>
@@ -293,7 +320,7 @@
       </div>
     </div>
 
-    <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · 管理员：周亮</footer>
+    <footer>img-sieve · 图片本地识别，内网离线运行 · MIT License · 管理员：周亮 14030105@suning.com</footer>
   </div>
   </main>
 </div>
@@ -306,14 +333,33 @@
   var pages={sync:document.getElementById('page-sync'),
              async:document.getElementById('page-async'),
              data:document.getElementById('page-data')};
-  document.querySelectorAll('.menu-item').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      document.querySelectorAll('.menu-item').forEach(function(b){ b.classList.remove('active'); });
-      btn.classList.add('active');
-      var p=btn.getAttribute('data-page');
-      Object.keys(pages).forEach(function(k){ pages[k].classList.toggle('hide', k!==p); });
+  var groupPeople=document.getElementById('groupPeople'),
+      childrenPeople=document.getElementById('childrenPeople'),
+      dataBtn=document.querySelector('.menu-parent[data-page="data"]');
+
+  function activate(page){
+    Object.keys(pages).forEach(function(k){ pages[k].classList.toggle('hide', k!==page); });
+    document.querySelectorAll('.menu-child[data-page]').forEach(function(b){
+      b.classList.toggle('active', b.dataset.page===page);
     });
+    groupPeople.classList.toggle('active', page==='sync' || page==='async');
+    dataBtn.classList.toggle('active', page==='data');
+  }
+
+  document.querySelectorAll('.menu-child[data-page]').forEach(function(btn){
+    btn.addEventListener('click', function(){ activate(btn.dataset.page); });
   });
+  dataBtn.addEventListener('click', function(){ activate('data'); });
+
+  /* 一级分组：点击折叠 / 展开子菜单 */
+  groupPeople.addEventListener('click', function(){
+    childrenPeople.classList.toggle('collapsed');
+    groupPeople.classList.toggle('collapsed');
+  });
+
+  /* 支持 ?tab=data 直达任务记录 */
+  var initPage = /[?&]tab=data/.test(location.search) ? 'data' : 'sync';
+  activate(initPage);
 
   /* ---------- 通用上传槽绑定 ---------- */
   function setPreview(imgEl, placeholderEl, slotEl, file){
@@ -355,9 +401,11 @@
     d = d || {};
     var u=d.user||{};
     set(document.getElementById(prefix+'Nick'), u.nickname);
-    set(document.getElementById(prefix+'Id'), u.douyin_id || u.xiaohongshu_id);
+    set(document.getElementById(prefix+'Id'), u.douyin_id || u.xiaohongshu_id || u.wechat_id);
     set(document.getElementById(prefix+'Obj'), d.chat_object_name);
     set(document.getElementById(prefix+'Phone'), d.phone);
+    var regionEl=document.getElementById(prefix+'Region');
+    if(regionEl) set(regionEl, u.region);
   }
 
   function renderCheckBanner(prefix, d){
@@ -557,7 +605,7 @@
         dPrev.disabled = res.page<=1;
         dNext.disabled = res.page>=dPages;
         if(!res.items.length){
-          dRows.innerHTML='<tr><td colspan="8" style="padding:18px;color:var(--muted);text-align:center">暂无数据</td></tr>';
+          dRows.innerHTML='<tr><td colspan="9" style="padding:18px;color:var(--muted);text-align:center">暂无数据</td></tr>';
           dDetailWrap.style.display='none';
           return;
         }
@@ -568,10 +616,16 @@
         }
         dRows.innerHTML=res.items.map(function(it){
           var st=esc(it.status);
+          var scene=it.scene==='order'?'order':'people';
+          var sceneBadge = scene==='order'
+            ? '<span class="badge pending">订单</span>'
+            : '<span class="badge done">人脉</span>';
+          var thumb2 = it.image2_name ? thumb(it.task_id,2) : '<span style="color:var(--muted)">—</span>';
           return '<tr style="border-bottom:1px solid var(--line)">'
             +'<td style="padding:9px 10px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(it.task_id.slice(0,12))+'…</td>'
+            +'<td style="padding:9px 10px">'+sceneBadge+'</td>'
             +'<td style="padding:9px 10px">'+thumb(it.task_id,1)+'</td>'
-            +'<td style="padding:9px 10px">'+thumb(it.task_id,2)+'</td>'
+            +'<td style="padding:9px 10px">'+thumb2+'</td>'
             +'<td style="padding:9px 10px"><span class="badge '+st+'">'+st+'</span></td>'
             +'<td style="padding:9px 10px">'+esc(it.backend||'—')+'</td>'
             +'<td style="padding:9px 10px">'+esc(fmt(it.created_at))+'</td>'
@@ -597,8 +651,9 @@
   dPrev.addEventListener('click', function(){ if(dPage>1){ dPage--; loadData(); } });
   dNext.addEventListener('click', function(){ if(dPage<dPages){ dPage++; loadData(); } });
 
-  // 切到“任务记录”页时自动加载第一页
-  document.querySelector('.menu-item[data-page="data"]').addEventListener('click', function(){ loadData(); });
+  // 切到“任务记录”页时自动加载第一页；?tab=data 直达时同样加载
+  dataBtn.addEventListener('click', function(){ loadData(); });
+  if(initPage==='data'){ loadData(); }
 })();
 </script>
 </body>
