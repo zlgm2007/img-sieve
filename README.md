@@ -21,8 +21,10 @@
 ## 快速使用（网页界面，最常用）
 
 ```
-./run.sh --host 0.0.0.0 --port 8080   # 启动服务
+./run.sh --host 0.0.0.0 --port 8080   # 仅同步识别：启动服务
 ```
+
+> 异步识别、任务记录、后台 worker 需要 MySQL：先在项目根目录配置 `.env`（见下文「异步识别 / 多机部署」），再用 `./keepalive.sh start` 启动。
 
 浏览器打开两个独立页面（左侧菜单可互相跳转）：
 
@@ -185,22 +187,26 @@ sudo firewall-cmd --reload
 
 ### 2. 创建 .env（每台机器都要，内容一致）
 
-在部署目录 `/opt/server/img-sieve/` 下新建 `.env`：
+`./install.sh` 执行成功后会自动把 `.env.example` 复制为 `.env`（已存在则不覆盖）。进入部署目录编辑：
 
 ```bash
 cd /opt/server/img-sieve
-cat > .env <<'EOF'
-# 机器 A（本机有 MySQL）用 127.0.0.1；机器 B/C 填机器 A 的内网 IP
+vi .env
+```
+
+按实际 MySQL 连接填写：
+
+```bash
 IMG_SIEVE_MYSQL_HOST=127.0.0.1
 IMG_SIEVE_MYSQL_PORT=3306
 IMG_SIEVE_MYSQL_USER=imgsieve
-IMG_SIEVE_MYSQL_PASSWORD=业务库强密码
+IMG_SIEVE_MYSQL_PASSWORD=数据库密码
 IMG_SIEVE_MYSQL_DB=imgsieve
-EOF
 ```
 
-- 机器 A 填 `127.0.0.1`；机器 B/C 填机器 A 的内网 IP（如 `10.237.179.21`）。
+- 机器 A（本机有 MySQL）填 `127.0.0.1`；机器 B/C 填机器 A 的内网 IP（如 `10.237.179.21`）。
 - 密码就是安装 MySQL 时 `IMGSIEVE_DB_PASSWORD` 设的那个，**所有机器必须一致**。
+- 系统环境变量优先级高于 `.env`；`run.sh`、`keepalive.sh` 启动时都会加载本文件。
 - 配好后用 `./keepalive.sh start` 启动，它会自动同时拉起 HTTP 和 worker；不配 `IMG_SIEVE_MYSQL_HOST` 则只跑 HTTP、不跑 worker。
 
 ```bash

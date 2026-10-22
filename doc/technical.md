@@ -79,6 +79,7 @@ img-sieve/
 - worker 认领任务后按 `task.scene` 分流：`order` → `recognize_order`，其余 → `recognize`；完成日志标注场景名。
 - `/task/{id}` 响应体带 `scene`；`/admin/tasks` 列表同时返回 `scene` 与两张图片文件名（订单任务 `image2_name` 为 `null`，前端据此条件渲染第二张缩略图）。
 - 队列机制沿用原设计：原子 `UPDATE ... WHERE status='pending'` 认领防重复、300 秒卡死回收、图片 LONGBLOB 入库、`/admin/purge` 按天清理。
+- MySQL 连接参数全部走环境变量，缺省 `host=127.0.0.1`、`port=3306`、`user=root`、`password=`、`db=imgsieve`。部署时把参数写入项目根目录 `.env`：`IMG_SIEVE_MYSQL_HOST / PORT / USER / PASSWORD / DB`；`run.sh`、`keepalive.sh` 启动时 `set -a; . ./.env; set +a` 加载，`img_sieve/db.py` 另有零依赖兜底解析（已存在的系统环境变量优先，`.env` 只补缺省），保证裸跑 `python server.py` / `worker.py` 也能读到配置。`IMG_SIEVE_ADMIN_TOKEN` 仅用于 `/admin/purge` 鉴权，`/admin/tasks` 不校验。
 
 ## Python 版本要求
 

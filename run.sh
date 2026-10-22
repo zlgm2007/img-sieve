@@ -7,6 +7,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 加载 MySQL/异步配置（若存在）；已存在的系统环境变量优先级更高。
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 # 日志目录：确保 logs/ 存在；前台(终端)运行时把全部输出同时落到控制台与 logs/server.log。
 LOG_DIR="logs"
 mkdir -p "$LOG_DIR"

@@ -436,6 +436,40 @@ JsonNode ids = root.path("data").path("order_ids");
 
 ---
 
+## 部署配置：MySQL 与 `.env`
+
+同步接口不强依赖 MySQL；**异步提交、任务记录、后台 worker** 必须配置 MySQL。连接参数走环境变量，也可写在项目根目录 `.env`（系统环境变量优先，`.env` 只补缺省）。
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `IMG_SIEVE_MYSQL_HOST` | `127.0.0.1` | MySQL 主机；多机部署时其余机器填 MySQL 所在机器内网 IP |
+| `IMG_SIEVE_MYSQL_PORT` | `3306` | MySQL 端口 |
+| `IMG_SIEVE_MYSQL_USER` | `root` | 数据库账号 |
+| `IMG_SIEVE_MYSQL_PASSWORD` | 空 | 数据库密码 |
+| `IMG_SIEVE_MYSQL_DB` | `imgsieve` | 任务库名 |
+| `IMG_SIEVE_ADMIN_TOKEN` | 空（不校验） | 仅 `/admin/purge` 鉴权；`/admin/tasks` 不校验 |
+
+`.env` 模板（`install.sh` 在 `.env` 不存在时自动从 `.env.example` 复制一份，已存在不覆盖）：
+
+```bash
+cd /opt/server/img-sieve
+vi .env
+```
+
+```bash
+IMG_SIEVE_MYSQL_HOST=127.0.0.1
+IMG_SIEVE_MYSQL_PORT=3306
+IMG_SIEVE_MYSQL_USER=imgsieve
+IMG_SIEVE_MYSQL_PASSWORD=数据库密码
+IMG_SIEVE_MYSQL_DB=imgsieve
+```
+
+- `run.sh`、`keepalive.sh` 启动时都会加载 `.env`；裸跑 `python server.py` / `worker.py` 时由 `db.py` 兜底解析同一份 `.env`。
+- 改完 `.env` 必须重启 HTTP 服务与 worker（`./keepalive.sh stop && ./keepalive.sh start`）；旧进程持有启动时的环境变量，不会自动热加载。
+- 若接口返回 `Access denied for user 'root'@'localhost' (using password: NO)`，说明进程未读到 `.env`：默认值生效为 `root` / 空密码。依次排查：`.env` 是否在部署目录、启动入口是否加载了配置、改配置后是否重启了旧进程。
+
+---
+
 ## 异步识别（多机部署）
 
 当部署为多台机器共享一个 MySQL 时，用异步接口：调用方上传后立即拿到 `task_id`，由任意一台机器的 worker 后台识别，再轮询查询结果。同步接口也会把每次识别写进同一张任务表，两边数据在「任务记录」页都能查到。

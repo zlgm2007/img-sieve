@@ -6,7 +6,7 @@
 - 图片以 LONGBLOB 直接入库，多机零额外共享存储；历史图片按天清理（purge_old）。
 - 连接参数全部走环境变量，便于多台机器指向同一库。
 
-环境变量：
+环境变量（也可写在项目根目录 .env，系统环境变量优先，.env 只补缺省）：
   IMG_SIEVE_MYSQL_HOST      默认 127.0.0.1
   IMG_SIEVE_MYSQL_PORT      默认 3306
   IMG_SIEVE_MYSQL_USER      默认 root
@@ -23,6 +23,36 @@ try:
     import pymysql
 except ImportError:  # pymysql 未装时给出清晰提示
     pymysql = None  # type: ignore
+
+
+def _load_dotenv() -> None:
+    """加载项目根目录 .env（零依赖，不覆盖已存在的系统环境变量）。
+
+    keepalive.sh 启动时已 source .env；这里兜底裸跑 `python server.py` /
+    `python worker.py` 等不经过 shell 脚本的入口，避免落到 root/空密码默认值。
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_path = os.path.join(root, ".env")
+    if not os.path.isfile(env_path):
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            # 去掉引号包裹与未加引号的值中的内联注释
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            elif " #" in value:
+                value = value.split(" #", 1)[0].rstrip()
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv()
 
 
 TABLE_SQL = """
