@@ -8,7 +8,11 @@
 
 启动后默认监听 `0.0.0.0:8080`，根路径为网页界面。
 
+**生产环境**：`http://10.104.209.194:8080/`（人脉识别网页）、`http://10.104.209.194:8080/order`（订单识别网页）、`http://10.104.209.194:8080/stats`（统计网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`
+
 **测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）、`http://10.237.179.21:8080/stats`（统计网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`
+
+> 下文所有调用示例均以**生产环境** `http://10.104.209.194:8080` 为准；对接测试环境时只需替换主机地址，路径与参数完全一致。
 
 ```
 ./run.sh --host 0.0.0.0 --port 8080
@@ -72,17 +76,17 @@
 
 ```
 # 抖音 / 小红书：自动判断角色
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "user=@raw/20261015135527202.jpg" \
   -F "chat=@raw/20261015135547661.jpg"
 
 # 微信：联系人页 + 对话框
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "user=@raw/wx20261022094534150.jpg" \
   -F "chat=@raw/wx20261022094522060.jpg"
 
 # 显式指定角色
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "pic1=@主页.png" \
   -F "pic2=@对话框.png" \
   -F "role=pic1:user" \
@@ -95,7 +99,7 @@ curl -X POST http://127.0.0.1:8080/recognize \
 import requests
 
 resp = requests.post(
-    "http://127.0.0.1:8080/recognize",
+    "http://10.104.209.194:8080/recognize",
     files={
         "user": ("主页.png", open("主页.png", "rb"), "image/png"),
         "chat": ("对话框.png", open("对话框.png", "rb"), "image/png"),
@@ -132,7 +136,7 @@ import java.io.IOException;
 
 public class ImgSieveClient {
 
-    private static final String URL = "http://127.0.0.1:8080/recognize";
+    private static final String URL = "http://10.104.209.194:8080/recognize";
 
     /**
      * 调用 img-sieve 识别接口
@@ -352,7 +356,7 @@ Boolean consistent = consistentNode.isNull() ? null : consistentNode.asBoolean()
 **示例（curl）：**
 
 ```
-curl -X POST http://127.0.0.1:8080/recognize-order \
+curl -X POST http://10.104.209.194:8080/recognize-order \
   -F "order=@raw/order20261022094541207.jpg"
 ```
 
@@ -529,7 +533,7 @@ IMG_SIEVE_MYSQL_DB=imgsieve
 **curl 示例：**
 
 ```bash
-curl -X POST http://10.237.179.21:8080/recognize/async \
+curl -X POST http://10.104.209.194:8080/recognize/async \
   -F "user=@主页.png" \
   -F "chat=@对话框.png"
 # => {"code":0,"message":"ok","task_id":"9c1f...","status":"pending"}
@@ -576,7 +580,7 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 **curl 示例：**
 
 ```bash
-curl -X POST http://10.237.179.21:8080/recognize-order/async \
+curl -X POST http://10.104.209.194:8080/recognize-order/async \
   -F "order=@订单截图.png"
 # => {"code":0,"message":"ok","task_id":"d2c8...","status":"pending"}
 ```
@@ -690,7 +694,7 @@ import java.io.IOException;
 
 public class ImgSieveAsyncClient {
 
-    private static final String BASE = "http://10.237.179.21:8080";
+    private static final String BASE = "http://10.104.209.194:8080";
     private final RestTemplate rest = new RestTemplate();
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -817,10 +821,10 @@ public class ImgSieveAsyncClient {
 
 ```bash
 # 第 1 页，默认每页 20 条
-curl "http://10.237.179.21:8080/admin/tasks?page=1"
+curl "http://10.104.209.194:8080/admin/tasks?page=1"
 
 # 按时间段过滤（URL 编码时间中的空格）
-curl "http://10.237.179.21:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026-10-22%2023:59:59"
+curl "http://10.104.209.194:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026-10-22%2023:59:59"
 ```
 
 ### GET /admin/stats
@@ -888,7 +892,7 @@ curl "http://10.237.179.21:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026
 **curl 示例：**
 
 ```bash
-curl "http://10.237.179.21:8080/admin/stats?days=7"
+curl "http://10.104.209.194:8080/admin/stats?days=7"
 ```
 
 ### POST /admin/purge?days=N
@@ -928,7 +932,7 @@ curl "http://10.237.179.21:8080/admin/stats?days=7"
 { "code": 403, "message": "需要正确的 token（?token=...）" }
 ```
 
-建议用 crontab 定期执行（如每天凌晨清 7 天前）：
+建议用 crontab 定期执行（如每天凌晨清 7 天前）。该任务建议配置在**部署 img-sieve 的那台机器**上，用 `127.0.0.1` 直连，避免依赖网络路由：
 
 ```bash
 0 3 * * * curl -s -X POST 'http://127.0.0.1:8080/admin/purge?days=7'
