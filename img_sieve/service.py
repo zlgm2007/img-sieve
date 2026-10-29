@@ -73,8 +73,9 @@ def _rotate_order_image(path, angle):
 def recognize_order(image_paths, backend=None):
     """订单识别：订单截图 → 订单号列表。
 
-    支持三类截图：订单列表页（一张图多个单号）、手工票据（OMS单号）、
-    订单详情页（订单编号，通常 1 个单号）。出参格式保持一致。
+    支持的截图：订单列表页（一张图多个单号）、手工票据（OMS单号）、
+    订单详情页 / 物流页 / 报表页（订单编号、订单编码、订单号码）、
+    手机实拍图。出参格式保持一致。
 
     Args:
         image_paths: 图片绝对路径列表（订单接口常规为 1 张）
@@ -85,7 +86,11 @@ def recognize_order(image_paths, backend=None):
           "code": 0,
           "message": "ok",
           "backend": "rapidocr",
-          "data": {"order_count": 4, "order_ids": ["...", "..."]}
+          "data": {
+            "order_count": 4,
+            "order_ids": ["...", "..."],
+            "order_items": [{"label": "订单号", "order_id": "..."}]
+          }
         }
     """
     results = ocr.run_ocr(image_paths, backend=backend)

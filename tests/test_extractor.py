@@ -12,7 +12,8 @@ from img_sieve import ocr  # noqa: E402
 from img_sieve.extractor import (extract_phone, extract_user_info,  # noqa: E402
                                  extract_chat_object_name, compare_nicknames,
                                  detect_platform, build_result, detect_roles,
-                                 extract_order_ids, build_order_result)
+                                 extract_order_ids, extract_order_items,
+                                 build_order_result)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USER_IMG = os.path.join(BASE, "raw", "20261015115909_4787_84.jpg")
@@ -165,8 +166,10 @@ class TestOrderExtractor(unittest.TestCase):
             _order_obs("单号：DA1153620", y1=385),
             _order_obs("OMS单号：210100025074430605", y1=406),
         ]
+        # 票据上「订单编号」与「OMS单号」都是订单号，都要抽取；
+        # 裸「单号：DA...」是商品 SKU，不抽。
         self.assertEqual(extract_order_ids(obs),
-                         ["210100025074430605"])
+                         ["MM00061870", "210100025074430605"])
 
     def test_qms_is_oms_ocr_typo(self):
         # 横版票据上 OCR 偶发把 O 识为 Q，规则兼容 QMS 前缀
@@ -206,6 +209,86 @@ class TestOrderExtractor(unittest.TestCase):
         ]
         self.assertEqual(extract_order_ids(obs),
                          ["210100025074400605", "210100025074420605"])
+
+
+class TestOrderLabelVariants(unittest.TestCase):
+    """订单号标签变体与取值格式（订单号 / 订单编号 / 订单编码 / 订单号码）。"""
+
+    def test_order_code_label(self):
+        obs = [_order_obs("订单编码：D4002566297")]
+        self.assertEqual(extract_order_ids(obs), ["D4002566297"])
+
+    def test_order_number_label_without_colon(self):
+        # 手机拍照的「订单号码」后可能没有冒号
+        obs = [_order_obs("订单号码3802223132735788788")]
+        self.assertEqual(extract_order_ids(obs), ["3802223132735788788"])
+
+    def test_order_number_label_halfwidth_colon(self):
+        obs = [_order_obs("订单编号:B5002436100")]
+        self.assertEqual(extract_order_ids(obs), ["B5002436100"])
+
+    def test_letter_prefixed_value(self):
+        # 字母前缀型：字母 + 6~20 位数字
+        for value in ("B5002436100", "D4002566297", "C2002610735",
+                      "D0012553903", "MM00061868"):
+            obs = [_order_obs("订单编号：" + value)]
+            self.assertEqual(extract_order_ids(obs), [value], value)
+
+    def test_nineteen_digit_pure_number(self):
+        # 美团单号 19 位（3802 2231 3273 5788 788），超出旧规则的 18 位上限
+        obs = [_order_obs("订单号码：3802223132735788788")]
+        self.assertEqual(extract_order_ids(obs), ["3802223132735788788"])
+
+    def test_spaced_grouped_value_normalized(self):
+        # 订单号在页面上是分组显示的，识别后应去掉空格
+        obs = [_order_obs("订单号码：3802 2231 3273 5788 788")]
+        self.assertEqual(extract_order_ids(obs), ["3802223132735788788"])
+
+    def test_label_and_value_on_adjacent_lines(self):
+        # 标签与编号不在同一行（手机拍照错位）：按空间位置就近配对
+        obs = [
+            _order_obs("订单号码：", y1=300, x1=190),
+            _order_obs("3802223132735788788", y1=320, x1=330),
+        ]
+        self.assertEqual(extract_order_ids(obs), ["3802223132735788788"])
+
+    def test_excludes_row_number_and_product_code(self):
+        # 订单行号 / 商品编码 / 运单号 / 税率 / 日期都不得混入
+        obs = [
+            _order_obs("订单行号：2101000250744106050", y1=100),
+            _order_obs("单号：DA1153598", y1=140),
+            _order_obs("极兔速递：JT3180673660562", y1=180),
+            _order_obs("税率 13%", y1=220),
+            _order_obs("纳税人识别号：130102********1525", y1=260),
+            _order_obs("2026-09-1816:49:25", y1=300),
+        ]
+        self.assertEqual(extract_order_ids(obs), [])
+
+    def test_excludes_price_glued_onto_number(self):
+        # 相邻行的金额不能被拼到订单号后面（行合并需按锚定分行）
+        obs = [
+            _order_obs("订单编号：MM00061870", y1=311, x1=446),
+            _order_obs("7438.00", y1=395, x1=483),
+        ]
+        self.assertEqual(extract_order_ids(obs), ["MM00061870"])
+
+    def test_order_items_carry_source_label(self):
+        obs = [
+            _order_obs("订单号：210100027596213478", y1=100),
+            _order_obs("订单号码3802223132735788788", y1=200),
+        ]
+        items = extract_order_items(obs)
+        self.assertEqual([it[0] for it in items], ["订单号", "订单号码"])
+        self.assertEqual([it[1] for it in items],
+                         ["210100027596213478", "3802223132735788788"])
+
+    def test_build_order_result_exposes_items(self):
+        obs = [_order_obs("订单编码：D4002566297")]
+        data = build_order_result([{"observations": obs}])
+        self.assertEqual(data["order_count"], 1)
+        self.assertEqual(data["order_ids"], ["D4002566297"])
+        self.assertEqual(data["order_items"],
+                         [{"label": "订单编码", "order_id": "D4002566297"}])
 
 
 if __name__ == "__main__":

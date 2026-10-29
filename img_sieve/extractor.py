@@ -1,5 +1,6 @@
-"""字段提取规则：从 OCR 结果中提取 用户昵称 / 抖音号 / 小红书号 / 微信号 / 地区 / 手机号码，
-以及订单截图（列表页 / 手工票据 / 详情页）的订单号列表。
+"""字段提取规则：从 OCR 结果中提取 用户昵称 / 抖音号 / 小红书号 / 微信号 / 地区 / 手机号码。
+
+订单号抽取规则见 `order_extract.py`（从本模块转发，保持历史导入路径可用）。
 
 输入为 ocr.run_ocr 返回的规范化结果：
 [
@@ -9,6 +10,10 @@
 from __future__ import annotations
 
 import re
+
+from .layout import group_rows
+from .order_extract import (ORDER_ID_RE, build_order_result,  # noqa: F401
+                            extract_order_ids, extract_order_items)
 
 # 中国大陆手机号：1 开头，第二位 3-9，共 11 位
 MOBILE_RE = re.compile(r"^1[3-9]\d{9}$")
@@ -41,19 +46,6 @@ PLATFORM_LABEL = {
 
 # 微信「地区」声明行（仅微信联系人页）
 REGION_RE = re.compile(r"地区\s*[:：]\s*(.+)")
-
-# 订单号声明行：
-# - 订单列表页：订单号：xxx（一张图可能有多条）
-# - 手工票据：OMS单号：xxx（OCR 偶发把 O 误识为 Q，兼容 QMS）
-# - 订单详情页：订单编号：xxx（只取编号，不取订单行号/单号/商品编码）
-# 编号限定 10~18 位数字；(?!\d) 防止吞掉相邻 OCR 碎片数字。
-ORDER_LABEL_PATTERNS = (
-    ("order_list", re.compile(r"订单号\s*[:：]\s*(\d{10,18})(?!\d)")),
-    ("oms", re.compile(r"[OQ]MS单号\s*[:：]\s*(\d{10,18})(?!\d)")),
-    ("order_detail", re.compile(r"订单编号\s*[:：]\s*(\d{10,18})(?!\d)")),
-)
-# 兼容旧引用：列表页原始规则。
-ORDER_ID_RE = ORDER_LABEL_PATTERNS[0][1]
 
 # 顶部状态栏 / 导航等干扰文本（不当作昵称）
 _NOISE = {
@@ -209,7 +201,7 @@ def extract_phone(obs):
     返回 {"phone": str|None, "raw": str|None}
     """
     # 按行聚合（同一 y 带）
-    rows = _group_rows(obs)
+    rows = group_rows(obs)
     for row in rows:
         if min(o["box"]["y1"] for o in row) < _PHONE_BAND_Y1:
             continue  # 顶部标题 / 状态栏，不是消息体
@@ -227,26 +219,6 @@ def extract_phone(obs):
             if MOBILE_RE.fullmatch(digits):
                 return {"phone": digits, "raw": o["text"].strip()}
     return {"phone": None, "raw": None}
-
-
-def _group_rows(obs, tol=40):
-    """把 observation 按纵向位置聚合成行（千分比坐标）。"""
-    sorted_obs = sorted(obs, key=lambda o: o["box"]["y1"])
-    rows = []
-    cur = []
-    for o in sorted_obs:
-        if not cur:
-            cur = [o]
-            continue
-        prev = cur[-1]
-        if abs(o["box"]["y1"] - prev["box"]["y1"]) <= tol:
-            cur.append(o)
-        else:
-            rows.append(cur)
-            cur = [o]
-    if cur:
-        rows.append(cur)
-    return rows
 
 
 def detect_roles(results):
@@ -397,52 +369,3 @@ def build_result(results, explicit_roles=None):
         },
     }
     return data
-
-
-def extract_order_ids(obs):
-    """从单张订单截图抽取全部订单号。
-
-    支持三类标签：列表页「订单号」、手工票据「OMS单号」、详情页「订单编号」。
-    先按单条观察匹配；未形成完整观察的行再按同行坐标合并兜底，
-    处理标签与编号被 OCR 拆成两条观察的情况。
-    返回按页面从上到下排序、去重后的订单号列表。
-    """
-    found = []
-    seen = set()
-
-    def _push(val, y1):
-        if val and val not in seen:
-            seen.add(val)
-            found.append((val, y1))
-
-    def _match_line(text, y1):
-        for _, pattern in ORDER_LABEL_PATTERNS:
-            for m in pattern.finditer(text):
-                _push(m.group(1), y1)
-
-    # 1) 逐观察匹配（多数情况整行在一条观察内）
-    for o in obs:
-        _match_line(o["text"], o["box"]["y1"])
-
-    # 2) 按行合并兜底：补齐标签与编号被 OCR 拆成两条观察的行；
-    #    已识别单号由 seen 去重，同一标签在不同行拆行也能继续兜底。
-    for row in _group_rows(obs):
-        row = sorted(row, key=lambda o: o["box"]["x1"])
-        line = "".join(o["text"] for o in row)
-        y1 = min(o["box"]["y1"] for o in row)
-        _match_line(line, y1)
-
-    found.sort(key=lambda x: x[1])
-    return [val for val, _ in found]
-
-
-def build_order_result(results):
-    """组装「订单识别」最终 JSON 数据：跨图合并去重，按阅读顺序返回订单号列表。"""
-    order_ids = []
-    seen = set()
-    for r in results:
-        for oid in extract_order_ids(r["observations"]):
-            if oid not in seen:
-                seen.add(oid)
-                order_ids.append(oid)
-    return {"order_count": len(order_ids), "order_ids": order_ids}

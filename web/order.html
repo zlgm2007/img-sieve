@@ -88,7 +88,9 @@
     border:1px solid var(--line);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow)}
   .order-idx{width:28px;height:28px;border-radius:50%;background:#eefaf8;color:var(--accent);
     font-weight:700;display:flex;align-items:center;justify-content:center;flex:none;font-size:13px}
-  .order-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:600;letter-spacing:.02em}
+  .order-label{flex:none;padding:3px 9px;border-radius:999px;background:#eef2f7;color:#64748b;
+    font-size:12px;font-weight:600;white-space:nowrap}
+  .order-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:600;letter-spacing:.02em;word-break:break-all}
   .order-empty{color:var(--muted);font-size:14px;padding:18px;text-align:center}
   .raw{margin-top:14px}
   .raw pre{background:#0f172a;color:#d7e0ea;padding:14px;border-radius:10px;overflow:auto;
@@ -146,7 +148,7 @@
   <div class="wrap">
     <header>
       <h1>订单识别</h1>
-      <p class="sub">上传订单列表页、手工票据或订单详情页截图，按标签抽取订单号；列表页可含多个，票据 / 详情页通常 1 个。图片仅本地处理。</p>
+      <p class="sub">上传订单列表页、手工票据、订单详情页、物流页或手机实拍图，按标签抽取订单号；支持「订单号」「订单编号」「订单编码」「订单号码」「OMS单号」，列表页可含多个，其余通常 1 个。图片仅本地处理。</p>
     </header>
 
     <!-- ===================== 同步识别 ===================== -->
@@ -306,14 +308,22 @@
   function renderOrderList(listEl, countEl, data){
     data = data || {};
     var ids = data.order_ids || [];
+    var items = Array.isArray(data.order_items)?data.order_items:null;
     countEl.textContent = '共 ' + (data.order_count !== undefined ? data.order_count : ids.length) + ' 个订单号';
     if(!ids.length){
-      listEl.innerHTML = '<div class="order-empty">未识别到订单号，请确认截图包含「订单号：」「OMS单号：」或「订单编号：」行</div>';
+      listEl.innerHTML = '<div class="order-empty">未识别到订单号，请确认截图包含「订单号：」「订单编号：」「订单编码：」「订单号码：」或「OMS单号：」行</div>';
       return;
     }
+    // 来源标签：order_items 为新字段，老服务没有时只显示单号
+    var labels = {};
+    if(items){
+      items.forEach(function(it){ if(it && it.order_id) labels[it.order_id] = it.label||''; });
+    }
     listEl.innerHTML = ids.map(function(id, i){
+      var label = labels[id];
       return '<div class="order-row">'
         + '<div class="order-idx">' + (i+1) + '</div>'
+        + (label ? '<span class="order-label">' + esc(label) + '</span>' : '')
         + '<div class="order-id">' + esc(id) + '</div>'
         + '</div>';
     }).join('');
