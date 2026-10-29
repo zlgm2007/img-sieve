@@ -8,7 +8,11 @@
 
 启动后默认监听 `0.0.0.0:8080`，根路径为网页界面。
 
+**生产环境**：`http://10.104.209.194:8080/`（人脉识别网页）、`http://10.104.209.194:8080/order`（订单识别网页）、`http://10.104.209.194:8080/stats`（统计网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`
+
 **测试环境**：`http://10.237.179.21:8080/`（人脉识别网页）、`http://10.237.179.21:8080/order`（订单识别网页）、`http://10.237.179.21:8080/stats`（统计网页）；主要接口 `POST /recognize`、`POST /recognize/async`、`POST /recognize-order`、`POST /recognize-order/async`、`GET /task/{task_id}`、`GET /admin/tasks`、`GET /admin/stats`、`GET /health`
+
+> 下文所有调用示例均以**生产环境** `http://10.104.209.194:8080` 为准；对接测试环境时只需替换主机地址，路径与参数完全一致。
 
 ```
 ./run.sh --host 0.0.0.0 --port 8080
@@ -72,17 +76,17 @@
 
 ```
 # 抖音 / 小红书：自动判断角色
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "user=@raw/20261015135527202.jpg" \
   -F "chat=@raw/20261015135547661.jpg"
 
 # 微信：联系人页 + 对话框
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "user=@raw/wx20261022094534150.jpg" \
   -F "chat=@raw/wx20261022094522060.jpg"
 
 # 显式指定角色
-curl -X POST http://127.0.0.1:8080/recognize \
+curl -X POST http://10.104.209.194:8080/recognize \
   -F "pic1=@主页.png" \
   -F "pic2=@对话框.png" \
   -F "role=pic1:user" \
@@ -95,7 +99,7 @@ curl -X POST http://127.0.0.1:8080/recognize \
 import requests
 
 resp = requests.post(
-    "http://127.0.0.1:8080/recognize",
+    "http://10.104.209.194:8080/recognize",
     files={
         "user": ("主页.png", open("主页.png", "rb"), "image/png"),
         "chat": ("对话框.png", open("对话框.png", "rb"), "image/png"),
@@ -132,7 +136,7 @@ import java.io.IOException;
 
 public class ImgSieveClient {
 
-    private static final String URL = "http://127.0.0.1:8080/recognize";
+    private static final String URL = "http://10.104.209.194:8080/recognize";
 
     /**
      * 调用 img-sieve 识别接口
@@ -332,13 +336,18 @@ Boolean consistent = consistentNode.isNull() ? null : consistentNode.asBoolean()
 
 ## 订单识别：POST /recognize-order
 
-与 `/recognize` 是两条独立业务线：**只传 1 张订单截图**，按页面从上到下顺序返回订单号列表；不做角色检测、不做跨图昵称核对。支持三类截图：
+与 `/recognize` 是两条独立业务线：**只传 1 张订单截图**，按页面从上到下顺序返回订单号列表；不做角色检测、不做跨图昵称核对。支持多类截图：
 
 | 截图类型 | 识别标签 | 单号数量 | 说明 |
 | --- | --- | --- | --- |
 | 订单列表页 | `订单号：` | 一张图可返回多个 | 保留原有多订单号能力 |
 | 手工票据 | `OMS单号：` | 通常 1 个 | OCR 偶发把 `O` 误识为 `Q`，规则兼容 `QMS单号：` |
 | 订单详情页 | `订单编号：` | 通常 1 个 | 仍复用 `order_ids` 数组，长度为 1 |
+| 详情页 / 物流页 / 报表页 | `订单编码：`、`订单号码：` | 通常 1 个 | 冒号可有可无，也支持完全无分隔符（如「订单号码3802223132735788788」） |
+| 手机实拍图 | 以上任意 | 通常 1 个 | 标签与编号错行时按空间位置就近配对；横放/倒置会先尝试旋转 |
+
+> 编号取值兼容三类写法：纯数字 10~20 位（如 `210100027596213478`、`3802223132735788788`）、字母前缀 + 数字（如 `B5002436100`、`D4002566297`、`MM00061868`）、分组写法（`3802 2231 3273 5788 788`，返回时去掉空格）。
+> 票据上的 `单号：DA...`、详情页的 `订单行号：...`、快递运单号、商品编码 / SKU、税率、日期、金额等不会混入。
 
 ### 入参
 
@@ -352,7 +361,7 @@ Boolean consistent = consistentNode.isNull() ? null : consistentNode.asBoolean()
 **示例（curl）：**
 
 ```
-curl -X POST http://127.0.0.1:8080/recognize-order \
+curl -X POST http://10.104.209.194:8080/recognize-order \
   -F "order=@raw/order20261022094541207.jpg"
 ```
 
@@ -372,6 +381,12 @@ curl -X POST http://127.0.0.1:8080/recognize-order \
       "210100027600353478",
       "210100027598393478",
       "210100027600333478"
+    ],
+    "order_items": [
+      {"label": "订单号", "order_id": "210100027596213478"},
+      {"label": "订单号", "order_id": "210100027600353478"},
+      {"label": "订单号", "order_id": "210100027598393478"},
+      {"label": "订单号", "order_id": "210100027600333478"}
     ]
   }
 }
@@ -386,10 +401,12 @@ curl -X POST http://127.0.0.1:8080/recognize-order \
 | `backend`          | string   | 实际使用的 OCR 后端                         |
 | `data.order_count` | int      | 识别到的订单号数量，与 `order_ids` 长度一致         |
 | `data.order_ids`   | string[] | 订单号列表，按页面从上到下阅读顺序排列、自动去重；未识别到时为 `[]` |
+| `data.order_items` | object[] | 每个订单号的来源标签与单号（`label` / `order_id`），顺序与 `order_ids` 一致；未识别到时为 `[]` |
 
-> 提取以标签前缀为锚点：`订单号：`、`OMS单号：`/`QMS单号：`、`订单编号：` 后 10~18 位数字。票据上的 `单号：DA...`、`订单编号：MM...`，详情页的 `订单行号：...`，以及商品编码、SKU、水印、日期等不会混入列表。
+> `order_count` / `order_ids` 是稳定契约；`order_items` 为新增的辅助字段（标注单号来自哪个标签，如「订单号」「订单编号」「订单编码」「订单号码」「OMS单号」），对接方按需取用，忽略即可。
+> 提取以标签前缀为锚点：`订单号：`、`订单编号：`、`订单编码：`、`订单号码：`、`OMS单号：`/`QMS单号：`，冒号可有可无。票据上的 `单号：DA...`、详情页的 `订单行号：...`、快递运单号、商品编码、SKU、水印、日期等不会混入列表。
 > 手工票据可能横放或倒置；首遍未抽到单号时，服务层会对单张图依次尝试 90° / 180° / 270° 旋转后重试，响应格式不变。
-> 页面未识别到订单号时：`order_count = 0`、`order_ids = []`，接口仍返回 HTTP 200。
+> 页面未识别到订单号时：`order_count = 0`、`order_ids = []`、`order_items = []`，接口仍返回 HTTP 200。
 
 **Java 对接（RestTemplate 片段）：**
 
@@ -408,6 +425,12 @@ ResponseEntity<String> resp = rest.exchange(
 JsonNode root = new ObjectMapper().readTree(resp.getBody());
 int count = root.path("data").path("order_count").asInt();
 JsonNode ids = root.path("data").path("order_ids");
+
+// 可选：data.order_items 带来源标签（label / order_id）
+for (JsonNode item : root.path("data").path("order_items")) {
+    String label    = item.path("label").asText(null);    // 如「订单编号」
+    String orderId  = item.path("order_id").asText(null);
+}
 ```
 
 ### 错误返回
@@ -529,7 +552,7 @@ IMG_SIEVE_MYSQL_DB=imgsieve
 **curl 示例：**
 
 ```bash
-curl -X POST http://10.237.179.21:8080/recognize/async \
+curl -X POST http://10.104.209.194:8080/recognize/async \
   -F "user=@主页.png" \
   -F "chat=@对话框.png"
 # => {"code":0,"message":"ok","task_id":"9c1f...","status":"pending"}
@@ -576,7 +599,7 @@ curl -X POST http://10.237.179.21:8080/recognize/async \
 **curl 示例：**
 
 ```bash
-curl -X POST http://10.237.179.21:8080/recognize-order/async \
+curl -X POST http://10.104.209.194:8080/recognize-order/async \
   -F "order=@订单截图.png"
 # => {"code":0,"message":"ok","task_id":"d2c8...","status":"pending"}
 ```
@@ -622,7 +645,7 @@ curl -X POST http://10.237.179.21:8080/recognize-order/async \
 **`result.data` 结构随 `scene` 不同：**
 
 - `scene=people`：结构同 `/recognize` 的 `data`（`user` / `phone` / `chat_object_name` / `nickname_check` 等）。
-- `scene=order`：结构同 `/recognize-order` 的 `data`（`order_count` / `order_ids`）。
+- `scene=order`：结构同 `/recognize-order` 的 `data`（`order_count` / `order_ids` / `order_items`）。
 
 建议先读 `scene` 字段再按对应结构解析 `result.data`。
 
@@ -690,7 +713,7 @@ import java.io.IOException;
 
 public class ImgSieveAsyncClient {
 
-    private static final String BASE = "http://10.237.179.21:8080";
+    private static final String BASE = "http://10.104.209.194:8080";
     private final RestTemplate rest = new RestTemplate();
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -817,10 +840,10 @@ public class ImgSieveAsyncClient {
 
 ```bash
 # 第 1 页，默认每页 20 条
-curl "http://10.237.179.21:8080/admin/tasks?page=1"
+curl "http://10.104.209.194:8080/admin/tasks?page=1"
 
 # 按时间段过滤（URL 编码时间中的空格）
-curl "http://10.237.179.21:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026-10-22%2023:59:59"
+curl "http://10.104.209.194:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026-10-22%2023:59:59"
 ```
 
 ### GET /admin/stats
@@ -888,7 +911,7 @@ curl "http://10.237.179.21:8080/admin/tasks?start=2026-10-22%2000:00:00&end=2026
 **curl 示例：**
 
 ```bash
-curl "http://10.237.179.21:8080/admin/stats?days=7"
+curl "http://10.104.209.194:8080/admin/stats?days=7"
 ```
 
 ### POST /admin/purge?days=N
@@ -928,7 +951,7 @@ curl "http://10.237.179.21:8080/admin/stats?days=7"
 { "code": 403, "message": "需要正确的 token（?token=...）" }
 ```
 
-建议用 crontab 定期执行（如每天凌晨清 7 天前）：
+建议用 crontab 定期执行（如每天凌晨清 7 天前）。该任务建议配置在**部署 img-sieve 的那台机器**上，用 `127.0.0.1` 直连，避免依赖网络路由：
 
 ```bash
 0 3 * * * curl -s -X POST 'http://127.0.0.1:8080/admin/purge?days=7'

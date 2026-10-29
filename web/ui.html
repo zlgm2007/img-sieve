@@ -145,9 +145,11 @@
   .modal-card .v.null{color:var(--muted);font-weight:400;font-size:13px}
   .modal-check{margin:0 0 12px}
   .order-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
-  .order-item{display:flex;justify-content:space-between;gap:12px;border:1px solid var(--line);
+  .order-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line);
     border-radius:10px;padding:10px 12px;background:#fafbfc}
-  .order-item .num{font-family:ui-monospace,Menlo,monospace;font-weight:600;word-break:break-all}
+  .order-item .num{font-family:ui-monospace,Menlo,monospace;font-weight:600;word-break:break-all;flex:1;min-width:0}
+  .order-item .tag{flex:none;padding:2px 9px;border-radius:999px;background:#eef2f7;color:#64748b;
+    font-size:12px;font-weight:600;white-space:nowrap}
   .modal-empty{color:var(--muted);padding:18px;text-align:center}
   .modal-error{margin-top:12px;padding:12px 14px;border-radius:10px;background:#fdecec;color:#a22;border:1px solid #f3c6c6}
   .modal-foot{padding:0 20px 18px}
@@ -745,11 +747,17 @@
     if(scene==='order'){
       var ids=Array.isArray(data.order_ids)?data.order_ids:[];
       var count=Number.isFinite(data.order_count)?data.order_count:ids.length;
+      var orderItems=Array.isArray(data.order_items)?data.order_items:null;
+      var labels={};
+      if(orderItems){ orderItems.forEach(function(it){ if(it&&it.order_id) labels[it.order_id]=it.label||''; }); }
       detailModalBody.innerHTML=detailThumbs(it)
         +'<div class="modal-cards">'+detailCard('订单号数量',count)+'</div>'
         +(ids.length
           ? '<div class="order-list">'+ids.map(function(id,i){
-              return '<div class="order-item"><span class="num">'+esc(id)+'</span>'
+              var label=labels[id];
+              return '<div class="order-item">'
+                +(label?'<span class="tag">'+esc(label)+'</span>':'')
+                +'<span class="num">'+esc(id)+'</span>'
                 +'<span style="color:var(--muted)">#'+(i+1)+'</span></div>';
             }).join('')+'</div>'
           : '<div class="modal-empty">未识别到订单号</div>');
