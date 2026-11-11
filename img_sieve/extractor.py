@@ -54,11 +54,23 @@ _NOISE = {
     # 微信联系人页导航 / 按钮
     "朋友资料", "权限", "仅聊天", "朋友圈", "发消息", "音视频通话",
     "备注", "标签",
+    # 企微客户详情页菜单 / 标题 / 按钮
+    "客户详情", "设置备注和描述", "用户自助服务", "添加时间", "来源",
+    "语音通话", "新媒体小红书",
+    # 小红书按钮 / 平台副标识
+    "关注", "发私信", "@微信",
 }
 
 # 聊天窗口横幅 / 提示（不当作对象昵称）
 _BANNER_NOISE = ("通知", "保障", "安全", "请遵守", "消息", "提示",
-                 "违法违规", "陌生人", "法律法规", "已开启")
+                 "违法违规", "陌生人", "法律法规", "已开启",
+                 "加个关注", "方便以后", "常聊", "关注", "发私信")
+
+# 社交媒体统计行（如 "6关注" "10粉丝" "12获赞与收藏"）
+_STATS_RE = re.compile(r"^\d+\s*(关注|粉丝|获赞与收藏|获赞|赞)$")
+
+# 水印文本：@公司名+数字 / 8 位以上连续数字（订单号、时间戳等）
+_WATERMARK_RE = re.compile(r"@[^@\n]{0,8}\d{3,}|\d{8,}")
 
 # 昵称一致性对比的最少字符数
 NICKNAME_COMPARE_CHARS = 5
@@ -72,6 +84,7 @@ def detect_platform(obs):
     """根据截图文本判断平台：douyin / xiaohongshu / wechat / None。
 
     微信联系人页可能只露出「地区」行而无微信号声明，也据此判为 wechat。
+    企微「客户详情」页（含「设置备注和描述」菜单）也判为 wechat。
     """
     for o in obs:
         t = o.get("text", "")
@@ -80,6 +93,10 @@ def detect_platform(obs):
                 return platform
         if REGION_RE.search(t):
             return "wechat"
+    # 企微客户详情页：无「微信号:」声明，但有「设置备注和描述」菜单
+    all_text = " ".join(o.get("text", "") for o in obs)
+    if "设置备注和描述" in all_text or "客户详情" in all_text:
+        return "wechat"
     return None
 
 
@@ -138,21 +155,21 @@ def extract_user_info(obs):
     return result
 
 
-def _extract_nickname(obs, douyin_obs):
-    """昵称通常位于『抖音号』声明行的正上方且水平居中对齐。"""
-    if douyin_obs is not None:
-        d = douyin_obs["box"]
+def _extract_nickname(obs, id_obs):
+    """昵称通常位于『账号声明行』的正上方且水平居中对齐。"""
+    if id_obs is not None:
+        d = id_obs["box"]
         d_cx = (d["x1"] + d["x2"]) / 2.0
         best = None
         best_dist = None
         for o in obs:
-            if o is douyin_obs:
+            if o is id_obs:
                 continue
             b = o["box"]
-            # 昵称行底缘应贴近抖音号行顶缘（在其正上方）
+            # 昵称行底缘应贴近账号声明行顶缘（在其正上方）
             if not (d["y1"] - 60 <= b["y2"] <= d["y1"] + 10):
                 continue
-            # 水平上需与抖音号行重叠（居中）
+            # 水平上需与账号声明行重叠（居中）
             o_cx = (b["x1"] + b["x2"]) / 2.0
             overlap = min(d["x2"], b["x2"]) - max(d["x1"], b["x1"])
             if overlap < (d["x2"] - d["x1"]) * 0.2:
@@ -164,28 +181,43 @@ def _extract_nickname(obs, douyin_obs):
         if best is not None:
             t = _norm_text(best["text"])
             if t and t not in _NOISE:
-                return t
+                return _clean_name(t)
 
     # 兜底：顶部区域内最长的、含中文或英文短语的文本
+    id_text = id_obs["text"] if id_obs is not None else ""
     candidates = []
     for o in obs:
         t = _norm_text(o["text"])
         b = o["box"]
         if not t or t in _NOISE:
             continue
-        if b["y1"] > 400:
+        if b["y1"] < 50 or b["y1"] > 400:
+            continue
+        # 排除账号声明行本身（如 "小红书号：1802052432"）
+        if t == id_text:
+            continue
+        if any(label in t for label in PLATFORM_LABEL):
+            continue
+        # 排除水印
+        if _WATERMARK_RE.search(t):
             continue
         # 排除明显非昵称的纯数字 / 时间
         if re.fullmatch(r"\d{1,4}", t):
             continue
         if re.fullmatch(r"\d{1,2}:\d{2}", t):
             continue
+        # 排除 IP 属地行
+        if t.startswith("IP") or t.startswith("ip"):
+            continue
+        # 排除社交媒体统计行（"6关注" "10粉丝" "12获赞与收藏"）
+        if _STATS_RE.match(t):
+            continue
         if len(t) < 2:
             continue
         candidates.append((len(t), t, b))
     if candidates:
         candidates.sort(key=lambda x: (-x[0], x[2]["y1"]))
-        return candidates[0][1]
+        return _clean_name(candidates[0][1])
     return None
 
 
@@ -225,18 +257,28 @@ def detect_roles(results):
     """自动判断两张图各自角色：user(主页/联系人) / chat(对话框)。
 
     含账号声明（抖音号/小红书号/微信号）或地区声明的 → user；
+    含企微客户详情标记（设置备注和描述/客户详情）的 → user；
     含 11 位大陆手机号的 → chat；
+    含聊天输入框（发消息或按住/发消息…）的 → chat；
     其余图片若顶部存在居中标题（微信对话框，消息体里不带手机号）→ chat。
     返回 {path: "user"|"chat"}。
     """
     roles = {}
     for r in results:
         text_all = "".join(o["text"] for o in r["observations"])
-        if any(label in text_all for label in PLATFORM_LABEL) or REGION_RE.search(text_all):
+        is_user = (any(label in text_all for label in PLATFORM_LABEL)
+                   or REGION_RE.search(text_all)
+                   or "设置备注和描述" in text_all
+                   or "客户详情" in text_all)
+        if is_user:
             roles[r["path"]] = "user"
             continue
         phone = extract_phone(r["observations"])["phone"]
         if phone:
+            roles[r["path"]] = "chat"
+            continue
+        # 聊天输入框（底部）：「发消息或按住…」「发消息·」
+        if re.search(r"发消息[或·…\.]", text_all):
             roles[r["path"]] = "chat"
             continue
         # 微信对话框兜底：顶部带存在居中标题候选
@@ -246,10 +288,11 @@ def detect_roles(results):
 
 
 def _clean_name(t):
-    """清洗聊天标题昵称：去掉前导符号；中文昵称尾部图标常被误识为孤立字母（Q/D 等），一并剥除。"""
+    """清洗昵称：去掉前导符号；中文昵称尾部大写字母/图标常被误识为孤立字母
+    （Q/D 等）或小人形图标（l/1/|），一并剥除；小写字母（如 "皮蛋y" 的 y）保留。"""
     t = re.sub(r"^[^\w\u4e00-\u9fff]+", "", t or "").strip()
     if re.search(r"[\u4e00-\u9fff]", t):
-        t = re.sub(r"[A-Za-z✓√◆●◇•]{1,2}$", "", t).strip()
+        t = re.sub(r"[A-Z✓√◆●◇•l1|]{1,2}$", "", t).strip()
     return t
 
 
@@ -267,20 +310,28 @@ def extract_chat_object_name(obs):
         b = o["box"]
         if not t:
             continue
-        # 顶部带：状态栏下方到消息列表上方
-        if not (40 <= b["y1"] <= 220):
+        # 顶部带：状态栏下方到消息列表上方（标题在 y~50-130，消息从 y~130+ 开始）
+        if not (40 <= b["y1"] <= 160):
             continue
         # 水平居中（排除左上角徽标/右上角按钮）
         cx = (b["x1"] + b["x2"]) / 2.0
         if not (150 <= cx <= 850):
             continue
-        # 排除状态栏/纯数字/符号
-        if re.fullmatch(r"[\dA-Za-z./:%@\s]+", t):
+        # 排除状态栏纯数字/时间/纯符号（但保留含字母的昵称，如 "1r.yy"）
+        if re.fullmatch(r"\d{1,2}:\d{2}", t):
+            continue
+        if re.fullmatch(r"\d+", t):
+            continue
+        if not re.search(r"[A-Za-z\u4e00-\u9fff]", t):
+            # 既无字母也无中文 → 纯符号/标点，不当昵称
             continue
         if len(t) < 2 or len(t) > 20:
             continue
         # 排除系统横幅 / 长句
         if any(k in t for k in _BANNER_NOISE):
+            continue
+        # 排除平台副标识（如 "@微信"）
+        if t.startswith("@"):
             continue
         cleaned = _clean_name(t)
         if len(cleaned) < 2:
@@ -310,6 +361,86 @@ def compare_nicknames(user_nickname, chat_object_name, n=NICKNAME_COMPARE_CHARS)
     if not u or not c:
         return None
     return u.startswith(c) or c.startswith(u)
+
+
+def detect_tiny_nickname(path, obs, role):
+    """像素级兜底：OCR 漏掉的单字符昵称（如 "."）检测。
+
+    当 OCR 在预期昵称位置找不到任何文本，但该位置存在一个孤立的小像素簇
+    （2~6px，即一个句点大小），推断昵称为 "."。
+
+    仅在以下条件满足时触发：
+    - chat 图：顶部 bar 中头像右侧、"..."菜单左侧有小像素簇
+    - user 图：平台账号声明行正上方有小像素簇
+    处理浅色模式（黑字白底）和深色模式（白字黑底）。
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+    except ImportError:
+        return None
+
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            arr = np.array(im.convert("L"))
+    except Exception:
+        return None
+
+    # 判断深色/浅色模式：取顶部背景均值
+    bg_sample = arr[max(0, int(h*0.02)):int(h*0.04), int(w*0.3):int(w*0.7)]
+    bg_mean = bg_sample.mean() if bg_sample.size else 255
+    dark_mode = bg_mean < 128
+
+    # 找昵称扫描区域（千分比坐标转像素）
+    if role == "chat":
+        # 顶部 bar：y 约 5%~10%，在头像右侧（x>20%）到菜单左侧（x<90%）
+        y1, y2 = int(h*0.05), int(h*0.10)
+        x1, x2 = int(w*0.20), int(w*0.90)
+    else:
+        # user 图：找账号声明行，在其正上方紧邻处扫描（不含声明行本身）
+        id_box = None
+        for o in obs:
+            for label in PLATFORM_LABEL:
+                if label in o["text"]:
+                    id_box = o["box"]
+                    break
+            if id_box:
+                break
+        if id_box is None:
+            return None
+        # 千分比转像素；昵称在声明行上方 1%~7% 高度范围内
+        id_y_px = int(id_box["y1"] / 1000.0 * h)
+        y2 = id_y_px - 3  # 排除声明行本身
+        y1 = max(0, y2 - int(h*0.05))
+        x1 = int(id_box["x1"] / 1000.0 * w) - 10
+        x2 = int(id_box["x2"] / 1000.0 * w) + 10
+
+    region = arr[y1:y2, x1:x2]
+    if region.size == 0:
+        return None
+
+    # 根据模式确定前景色阈值
+    if dark_mode:
+        fg_mask = region > bg_mean + 40  # 浅色前景
+    else:
+        fg_mask = region < bg_mean - 40  # 深色前景
+
+    # 找前景像素簇
+    fg_rows = np.where(fg_mask.any(axis=1))[0]
+    if len(fg_rows) == 0:
+        return None
+
+    fg_cols = np.where(fg_mask.any(axis=0))[0]
+    px_count = int(fg_mask.sum())
+    cluster_h = int(fg_rows.max() - fg_rows.min() + 1)
+    cluster_w = int(fg_cols.max() - fg_cols.min() + 1)
+
+    # 单字符（句点）特征：像素极少，簇宽高都很小（2~10px）
+    # 正常文字 OCR 一定能检出，走到这里说明簇极小
+    if px_count <= 40 and cluster_h <= 10 and cluster_w <= 10:
+        return "."
+    return None
 
 
 def build_result(results, explicit_roles=None):
@@ -348,11 +479,21 @@ def build_result(results, explicit_roles=None):
                     "douyin_id": u["douyin_id"],
                     "xiaohongshu_id": u["xiaohongshu_id"],
                     "wechat_id": u["wechat_id"], "region": u["region"]}
+            # 像素级兜底：OCR 漏掉的单字符昵称
+            if user["nickname"] is None:
+                tiny = detect_tiny_nickname(r["path"], r["observations"], "user")
+                if tiny:
+                    user["nickname"] = tiny
         elif role == "chat":
             p = extract_phone(r["observations"])
             phone = p["phone"]
             raw = p["raw"]
             chat_object_name = extract_chat_object_name(r["observations"])
+            # 像素级兜底：OCR 漏掉的单字符聊天对象昵称
+            if chat_object_name is None:
+                tiny = detect_tiny_nickname(r["path"], r["observations"], "chat")
+                if tiny:
+                    chat_object_name = tiny
 
     consistent = compare_nicknames(user["nickname"], chat_object_name)
 
